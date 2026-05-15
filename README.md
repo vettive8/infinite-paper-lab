@@ -9,6 +9,7 @@ Each version folder is a separate experiment:
 - `v3/` keeps `v2` behavior and tests tighter Notepad-like line spacing.
 - `v4/` keeps `v3` behavior and tests PDF-like `Ctrl` + `F` search navigation.
 - `v5/` keeps `v4` behavior and tests `Ctrl` + `F` as a find-bar toggle.
+- `v6/` keeps `v5` behavior and tests live note sync across tabs.
 
 The rule for experiments:
 
