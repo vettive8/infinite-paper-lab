@@ -5,7 +5,8 @@ This is a research and development workspace for testing simple infinite-paper n
 Each version folder is a separate experiment:
 
 - `v1/` is the frozen first version: a full-screen white paper where clicking creates a writable note.
-- `v2/` is the next experiment workspace, currently copied from `v1` as a baseline.
+- `v2/` tests no automatic wrapping: lines only break when Enter is pressed.
+- `v3/` keeps `v2` behavior and tests tighter Notepad-like line spacing.
 
 The rule for experiments:
 
