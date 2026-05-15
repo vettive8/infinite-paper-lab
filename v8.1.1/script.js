@@ -35,6 +35,7 @@
   let undoInProgress = false;
   let boardClipboard = null;
   let boardCopyPromise = null;
+  let textAddUndoIds = new Set();
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -349,6 +350,7 @@
       }
       dirtyNoteIds.add(noteId);
       currentNote.text = getNoteText(element);
+      recordTextAddUndo(noteId, currentNote.text);
       if (!findBar.hidden) {
         refreshFindMatches();
       }
@@ -362,6 +364,7 @@
       }
       currentNote.text = getNoteText(element);
       if (!currentNote.text.trim()) {
+        removeUndoAddReferences([noteId]);
         removeNote(noteId);
       } else {
         saveNotesSoon();
@@ -464,11 +467,48 @@
     return !activeNote || !getNoteText(activeNote) || hasSelectionOutsideActiveNote(activeNote);
   }
 
+  function removeActiveEmptyTextNote(activeNote) {
+    if (!activeNote || getNoteText(activeNote).trim()) {
+      return;
+    }
+
+    removeUndoAddReferences([activeNote.dataset.id]);
+    removeNote(activeNote.dataset.id);
+  }
+
   function pushUndoAction(action) {
     undoStack.push(action);
     if (undoStack.length > 20) {
       undoStack.shift();
     }
+  }
+
+  function removeUndoAddReferences(ids) {
+    const idSet = new Set(ids);
+    undoStack = undoStack
+      .map((action) => {
+        if (action.type !== "add") {
+          return action;
+        }
+        return {
+          ...action,
+          ids: (action.ids || []).filter((id) => !idSet.has(id)),
+        };
+      })
+      .filter((action) => action.type !== "add" || action.ids.length);
+
+    for (const id of idSet) {
+      textAddUndoIds.delete(id);
+    }
+  }
+
+  function recordTextAddUndo(id, text) {
+    if (!text.trim() || textAddUndoIds.has(id)) {
+      return;
+    }
+
+    textAddUndoIds.add(id);
+    pushUndoAction({ type: "add", ids: [id] });
   }
 
   async function captureUndoItems(ids) {
@@ -670,6 +710,7 @@
 
     for (const removedNote of removedNotes) {
       selectedNoteIds.delete(removedNote.id);
+      textAddUndoIds.delete(removedNote.id);
       const element = paper.querySelector(`[data-id="${CSS.escape(removedNote.id)}"]`);
       if (element) {
         releaseImageElement(element);
@@ -1556,6 +1597,7 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "z") {
       if (shouldUseBoardShortcut(activeTextNote) && (undoStack.length || selectedNoteIds.size)) {
         event.preventDefault();
+        removeActiveEmptyTextNote(activeTextNote);
         undoOrDeleteSelection();
       }
       return;
@@ -1567,6 +1609,7 @@
       shouldUseBoardShortcut(activeTextNote)
     ) {
       event.preventDefault();
+      removeActiveEmptyTextNote(activeTextNote);
       deleteSelectedNotes();
       return;
     }
