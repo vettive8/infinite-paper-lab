@@ -442,6 +442,26 @@
     return notes.find((note) => note.id === id);
   }
 
+  function getActiveTextNoteElement() {
+    return document.activeElement?.classList.contains("note") ? document.activeElement : null;
+  }
+
+  function hasSelectionOutsideActiveNote(activeNote) {
+    if (!selectedNoteIds.size) {
+      return false;
+    }
+
+    if (!activeNote) {
+      return true;
+    }
+
+    return [...selectedNoteIds].some((id) => id !== activeNote.dataset.id);
+  }
+
+  function shouldUseBoardShortcut(activeNote) {
+    return !activeNote || !getNoteText(activeNote) || hasSelectionOutsideActiveNote(activeNote);
+  }
+
   function pushUndoAction(action) {
     undoStack.push(action);
     if (undoStack.length > 20) {
@@ -1179,6 +1199,17 @@
     }
   }
 
+  async function undoOrDeleteSelection() {
+    if (undoStack.length) {
+      await undoLastAction();
+      return;
+    }
+
+    if (selectedNoteIds.size) {
+      await deleteSelectedNotes();
+    }
+  }
+
   function endMoveSelection() {
     viewport.classList.remove("is-moving-selection");
     if (activeDrag.moved) {
@@ -1385,21 +1416,27 @@
       return;
     }
 
-    if (document.activeElement?.classList.contains("note")) {
-      return;
-    }
+    const activeTextNote = getActiveTextNoteElement();
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "z") {
-      if (undoStack.length) {
+      if (shouldUseBoardShortcut(activeTextNote) && (undoStack.length || selectedNoteIds.size)) {
         event.preventDefault();
-        undoLastAction();
+        undoOrDeleteSelection();
       }
       return;
     }
 
-    if ((event.key === "Delete" || event.key === "Backspace") && selectedNoteIds.size) {
+    if (
+      (event.key === "Delete" || event.key === "Backspace") &&
+      selectedNoteIds.size &&
+      shouldUseBoardShortcut(activeTextNote)
+    ) {
       event.preventDefault();
       deleteSelectedNotes();
+      return;
+    }
+
+    if (activeTextNote) {
       return;
     }
 
