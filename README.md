@@ -7,6 +7,7 @@ Each version folder is a separate experiment:
 - `v1/` is the frozen first version: a full-screen white paper where clicking creates a writable note.
 - `v2/` tests no automatic wrapping: lines only break when Enter is pressed.
 - `v3/` keeps `v2` behavior and tests tighter Notepad-like line spacing.
+- `v4/` keeps `v3` behavior and tests PDF-like `Ctrl` + `F` search navigation.
 
 The rule for experiments:
 
