@@ -33,6 +33,8 @@
   let selectedNoteIds = new Set();
   let undoStack = [];
   let undoInProgress = false;
+  let boardClipboard = null;
+  let boardCopyPromise = null;
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -477,13 +479,64 @@
         continue;
       }
 
-      const item = { note: cloneNote(note), blob: null };
+      const element = paper.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      const item = {
+        note: cloneNote(note),
+        blob: null,
+        width: element?.offsetWidth || note.width || 0,
+        height: element?.offsetHeight || note.height || 0,
+      };
       if (note.type === "image" && note.imageId) {
         item.blob = await getImageBlob(note.imageId).catch(() => null);
       }
       items.push(item);
     }
     return items;
+  }
+
+  async function writeSystemClipboard(items) {
+    if (!navigator.clipboard) {
+      return;
+    }
+
+    const imageItems = items.filter((item) => item.note.type === "image" && item.blob);
+    if (items.length === 1 && imageItems.length === 1 && window.ClipboardItem) {
+      const item = imageItems[0];
+      const mimeType = item.blob.type || item.note.mimeType || "image/png";
+      await navigator.clipboard.write([new ClipboardItem({ [mimeType]: item.blob })]);
+      return;
+    }
+
+    const text = items
+      .filter((item) => isTextNote(item.note) && item.note.text)
+      .map((item) => item.note.text)
+      .join("\n\n");
+    if (text) {
+      await navigator.clipboard.writeText(text);
+    }
+  }
+
+  async function copySelectedNotes() {
+    if (!selectedNoteIds.size) {
+      return false;
+    }
+
+    syncNotesFromDom();
+    const orderedIds = notes
+      .filter((note) => selectedNoteIds.has(note.id))
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .map((note) => note.id);
+    const items = await captureUndoItems(orderedIds);
+    if (!items.length) {
+      return false;
+    }
+
+    boardClipboard = {
+      items,
+      pasteCount: 0,
+    };
+    writeSystemClipboard(items).catch(() => {});
+    return true;
   }
 
   function getNoteText(element) {
@@ -1102,12 +1155,78 @@
     };
   }
 
+  function clipboardMatchesBoardClipboard(images) {
+    const imageItems = boardClipboard?.items.filter((item) => item.note.type === "image" && item.blob) || [];
+    if (images.length !== 1 || imageItems.length !== 1 || boardClipboard.items.length !== 1) {
+      return false;
+    }
+
+    const clipboardImage = images[0];
+    const boardImage = imageItems[0].blob;
+    return clipboardImage.type === boardImage.type && clipboardImage.size === boardImage.size;
+  }
+
+  async function pasteBoardClipboard() {
+    if (!boardClipboard?.items.length) {
+      return;
+    }
+
+    syncNotesFromDom();
+
+    const offset = (boardClipboard.pasteCount + 1) * 28;
+    const addedIds = [];
+
+    for (const item of boardClipboard.items) {
+      const note = cloneNote(item.note);
+      note.x = Math.round(item.note.x + offset);
+      note.y = Math.round(item.note.y + offset);
+
+      if (note.type === "image") {
+        if (!item.blob) {
+          continue;
+        }
+        const imageId = makeId();
+        note.id = imageId;
+        note.imageId = imageId;
+        await saveImageBlob(imageId, item.blob);
+      } else {
+        note.id = makeId();
+      }
+
+      notes.push(note);
+      paper.appendChild(createNoteElement(note));
+      addedIds.push(note.id);
+    }
+
+    if (addedIds.length) {
+      boardClipboard.pasteCount += 1;
+      setSelectedNotes(addedIds);
+      pushUndoAction({ type: "add", ids: addedIds });
+      saveNotesNow();
+    }
+  }
+
   async function handlePaste(event) {
     if (findBar.contains(document.activeElement)) {
       return;
     }
 
+    if (boardCopyPromise) {
+      await boardCopyPromise;
+    }
+
+    const activeTextNote = getActiveTextNoteElement();
     const images = getClipboardImages(event);
+    if (
+      boardClipboard &&
+      shouldUseBoardShortcut(activeTextNote) &&
+      (!images.length || clipboardMatchesBoardClipboard(images))
+    ) {
+      event.preventDefault();
+      pasteBoardClipboard();
+      return;
+    }
+
     if (!images.length) {
       return;
     }
@@ -1423,6 +1542,16 @@
     }
 
     const activeTextNote = getActiveTextNoteElement();
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "c") {
+      if (selectedNoteIds.size && shouldUseBoardShortcut(activeTextNote)) {
+        event.preventDefault();
+        boardCopyPromise = copySelectedNotes().finally(() => {
+          boardCopyPromise = null;
+        });
+      }
+      return;
+    }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "z") {
       if (shouldUseBoardShortcut(activeTextNote) && (undoStack.length || selectedNoteIds.size)) {
