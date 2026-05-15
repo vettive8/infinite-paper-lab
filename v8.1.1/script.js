@@ -1035,23 +1035,29 @@
 
     const images = [];
     const seen = new Set();
+    const addImageFile = (file) => {
+      if (!file?.type?.startsWith("image/")) {
+        return;
+      }
+
+      const key = `${file.type}:${file.size}`;
+      if (seen.has(key)) {
+        return;
+      }
+
+      seen.add(key);
+      images.push(file);
+    };
 
     for (const item of Array.from(clipboard.items || [])) {
       if (item.kind !== "file" || !item.type.startsWith("image/")) {
         continue;
       }
-      const file = item.getAsFile();
-      if (file && !seen.has(file)) {
-        seen.add(file);
-        images.push(file);
-      }
+      addImageFile(item.getAsFile());
     }
 
     for (const file of Array.from(clipboard.files || [])) {
-      if (file.type.startsWith("image/") && !seen.has(file)) {
-        seen.add(file);
-        images.push(file);
-      }
+      addImageFile(file);
     }
 
     return images;
