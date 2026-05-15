@@ -67,7 +67,7 @@
   function createNoteElement(note) {
     const element = document.createElement("div");
     element.className = "note";
-    element.contentEditable = "true";
+    element.contentEditable = "plaintext-only";
     element.spellcheck = true;
     element.dataset.id = note.id;
     element.style.left = `${note.x}px`;
@@ -79,12 +79,12 @@
     });
 
     element.addEventListener("input", () => {
-      note.text = element.textContent;
+      note.text = getNoteText(element);
       saveSoon();
     });
 
     element.addEventListener("blur", () => {
-      note.text = element.textContent;
+      note.text = getNoteText(element);
       if (!note.text.trim()) {
         removeNote(note.id);
       } else {
@@ -100,6 +100,10 @@
     });
 
     return element;
+  }
+
+  function getNoteText(element) {
+    return element.innerText.replace(/\n$/, "");
   }
 
   function renderNotes() {

@@ -49,8 +49,9 @@ body {
 
 .note {
   position: absolute;
-  min-width: 10ch;
-  max-width: min(720px, 82vw);
+  width: max-content;
+  min-width: 1ch;
+  max-width: none;
   min-height: 1.45em;
   padding: 1px 2px;
   border: 0;
@@ -61,13 +62,10 @@ body {
   cursor: text;
   font: 18px/1.45 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   letter-spacing: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
   user-select: text;
-}
-
-.note:empty {
-  min-width: 1ch;
 }
 
 .note::selection,
