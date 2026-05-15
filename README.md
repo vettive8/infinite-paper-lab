@@ -10,6 +10,7 @@ Each version folder is a separate experiment:
 - `v4/` keeps `v3` behavior and tests PDF-like `Ctrl` + `F` search navigation.
 - `v5/` keeps `v4` behavior and tests `Ctrl` + `F` as a find-bar toggle.
 - `v6/` keeps `v5` behavior and tests live note sync across tabs.
+- `v7/` keeps `v6` behavior and tests right-drag selection plus left-drag movement.
 
 The rule for experiments:
 
