@@ -11,6 +11,11 @@ Each version folder is a separate experiment:
 - `v5/` keeps `v4` behavior and tests `Ctrl` + `F` as a find-bar toggle.
 - `v6/` keeps `v5` behavior and tests live note sync across tabs.
 - `v7/` keeps `v6` behavior and tests right-drag selection plus left-drag movement.
+- `v8.1/` keeps `v7` behavior and tests edge snapping while moving notes.
+- `v8.2/` keeps `v7` behavior and tests text-line snapping while moving notes.
+- `v8.3/` keeps `v7` behavior and tests `Shift`-constrained movement.
+- `v8.4/` keeps `v7` behavior and tests keyboard alignment commands.
+- `v8.5/` keeps `v7` behavior and tests visual alignment guides.
 
 The rule for experiments:
 
