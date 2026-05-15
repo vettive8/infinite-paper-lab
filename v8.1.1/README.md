@@ -19,5 +19,7 @@ Changes from `v1`:
 - While dragging, selected notes snap to nearby note edges and centers.
 - Paste a screenshot or image with `Ctrl` + `V` to add it to the visible board.
 - Pasted images can be selected with right-drag and moved with selected notes.
+- Press `Delete` or `Backspace` to remove selected notes/images.
+- Press `Ctrl` + `Z` to undo the latest pasted image or selected-item deletion.
 - On first open, this version copies existing `v8.1` notes into `v8.1.1` storage if `v8.1.1` is empty.
 - Browser storage is separate from earlier versions, so each version can be tested independently.

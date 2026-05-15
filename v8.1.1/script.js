@@ -31,6 +31,8 @@
   let migratedFromLegacy = false;
   let dirtyNoteIds = new Set();
   let selectedNoteIds = new Set();
+  let undoStack = [];
+  let undoInProgress = false;
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -138,6 +140,10 @@
         text: note.text || "",
       };
     });
+  }
+
+  function cloneNote(note) {
+    return cleanNotes([note])[0];
   }
 
   function normalizeNotes(sourceNotes) {
@@ -436,6 +442,30 @@
     return notes.find((note) => note.id === id);
   }
 
+  function pushUndoAction(action) {
+    undoStack.push(action);
+    if (undoStack.length > 20) {
+      undoStack.shift();
+    }
+  }
+
+  async function captureUndoItems(ids) {
+    const items = [];
+    for (const id of ids) {
+      const note = findNote(id);
+      if (!note) {
+        continue;
+      }
+
+      const item = { note: cloneNote(note), blob: null };
+      if (note.type === "image" && note.imageId) {
+        item.blob = await getImageBlob(note.imageId).catch(() => null);
+      }
+      items.push(item);
+    }
+    return items;
+  }
+
   function getNoteText(element) {
     return element.innerText.replace(/\n$/, "");
   }
@@ -551,23 +581,41 @@
     saveNotesSoon();
   }
 
-  function removeNote(id) {
-    const index = notes.findIndex((note) => note.id === id);
-    if (index === -1) {
-      return;
+  function removeNotes(ids, options = {}) {
+    const idSet = new Set(ids);
+    const shouldDeleteImages = options.deleteImages !== false;
+    const shouldSave = options.save !== false;
+    const removedNotes = [];
+
+    notes = notes.filter((note) => {
+      if (!idSet.has(note.id)) {
+        return true;
+      }
+      removedNotes.push(note);
+      return false;
+    });
+
+    for (const removedNote of removedNotes) {
+      selectedNoteIds.delete(removedNote.id);
+      const element = paper.querySelector(`[data-id="${CSS.escape(removedNote.id)}"]`);
+      if (element) {
+        releaseImageElement(element);
+        element.remove();
+      }
+      if (shouldDeleteImages && removedNote.type === "image") {
+        deleteImageBlob(removedNote.imageId).catch(() => {});
+      }
     }
-    const [removedNote] = notes.splice(index, 1);
-    selectedNoteIds.delete(id);
-    const element = paper.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    if (element) {
-      releaseImageElement(element);
-      element.remove();
-    }
-    if (removedNote?.type === "image") {
-      deleteImageBlob(removedNote.imageId).catch(() => {});
-    }
+
     updateSelectedNoteStyles();
-    saveNotesSoon();
+    if (shouldSave) {
+      saveNotesSoon();
+    }
+    return removedNotes;
+  }
+
+  function removeNote(id) {
+    removeNotes([id]);
   }
 
   function openFind() {
@@ -1057,7 +1105,77 @@
 
     if (addedIds.length) {
       setSelectedNotes(addedIds);
+      pushUndoAction({ type: "add", ids: addedIds });
       saveNotesNow();
+    }
+  }
+
+  async function deleteSelectedNotes() {
+    if (!selectedNoteIds.size || undoInProgress) {
+      return;
+    }
+
+    syncNotesFromDom();
+    const ids = [...selectedNoteIds].filter((id) => findNote(id));
+    if (!ids.length) {
+      clearSelectedNotes();
+      return;
+    }
+
+    const items = await captureUndoItems(ids);
+    if (!items.length) {
+      return;
+    }
+
+    pushUndoAction({ type: "delete", items });
+    removeNotes(ids, { save: false });
+    saveNotesNow();
+  }
+
+  async function restoreDeletedItems(items) {
+    const restoredIds = [];
+
+    for (const item of items) {
+      if (!item?.note || findNote(item.note.id)) {
+        continue;
+      }
+
+      if (item.note.type === "image" && item.blob) {
+        await saveImageBlob(item.note.imageId, item.blob);
+      }
+
+      const note = cloneNote(item.note);
+      notes.push(note);
+      paper.appendChild(createNoteElement(note));
+      restoredIds.push(note.id);
+    }
+
+    if (restoredIds.length) {
+      setSelectedNotes(restoredIds);
+      saveNotesNow();
+    }
+  }
+
+  async function undoLastAction() {
+    if (undoInProgress || !undoStack.length) {
+      return;
+    }
+
+    undoInProgress = true;
+    try {
+      syncNotesFromDom();
+      const action = undoStack.pop();
+      if (action.type === "add") {
+        removeNotes(action.ids || [], { save: false });
+        saveNotesNow();
+        return;
+      }
+
+      if (action.type === "delete") {
+        await restoreDeletedItems(action.items || []);
+      }
+    } finally {
+      undoInProgress = false;
     }
   }
 
@@ -1270,6 +1388,21 @@
     if (document.activeElement?.classList.contains("note")) {
       return;
     }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "z") {
+      if (undoStack.length) {
+        event.preventDefault();
+        undoLastAction();
+      }
+      return;
+    }
+
+    if ((event.key === "Delete" || event.key === "Backspace") && selectedNoteIds.size) {
+      event.preventDefault();
+      deleteSelectedNotes();
+      return;
+    }
+
     if (event.code === "Space") {
       spaceDown = true;
       event.preventDefault();
