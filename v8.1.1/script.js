@@ -14,6 +14,7 @@
   const syncChannelName = "infinite-paper:v8.1.1:sync";
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
+  const clipboardBridgeImageUrl = "http://127.0.0.1:8124/clipboard-image";
   const panThreshold = 5;
   const snapDistance = 8;
   const pastedImageMaxWidth = 760;
@@ -1405,6 +1406,35 @@
     return images;
   }
 
+  async function readBridgeClipboardImages() {
+    const images = [];
+    const seen = new Set();
+
+    try {
+      const response = await fetch(`${clipboardBridgeImageUrl}?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (!response.ok || response.status === 204) {
+        return [];
+      }
+
+      addClipboardImage(images, seen, await response.blob(), "image/png");
+    } catch {
+      return [];
+    }
+
+    return images;
+  }
+
+  async function readFallbackClipboardImages() {
+    const systemImages = await readSystemClipboardImages();
+    if (systemImages.length) {
+      return systemImages;
+    }
+
+    return readBridgeClipboardImages();
+  }
+
   function getImagePasteSignature(images) {
     return images.map((image) => `${image.type || "image"}:${image.size || 0}`).join("|");
   }
@@ -1577,7 +1607,7 @@
     }
 
     if (!images.length && (!hasReadableText || shouldUseBoardShortcut(activeTextNote))) {
-      images = await readSystemClipboardImages();
+      images = await readFallbackClipboardImages();
     }
 
     if (
@@ -1615,7 +1645,7 @@
 
   async function probeKeyboardImagePaste(activeTextNote) {
     const probeId = ++keyboardImagePasteProbe;
-    const images = await readSystemClipboardImages();
+    const images = await readFallbackClipboardImages();
     if (probeId !== keyboardImagePasteProbe || !images.length || isRecentImagePaste(images)) {
       return;
     }
