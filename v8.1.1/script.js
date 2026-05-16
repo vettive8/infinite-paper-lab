@@ -141,6 +141,7 @@
           mimeType: note.mimeType || "image/png",
           width: note.width,
           height: note.height,
+          rotation: normalizeRotation(note.rotation),
         };
       }
 
@@ -178,11 +179,21 @@
         mimeType: typeof note.mimeType === "string" ? note.mimeType : "image/png",
         width: Number.isFinite(Number(note.width)) ? Math.round(Number(note.width)) : 320,
         height: Number.isFinite(Number(note.height)) ? Math.round(Number(note.height)) : 180,
+        rotation: normalizeRotation(note.rotation),
       }));
   }
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function normalizeRotation(value) {
+    const degrees = Number(value) || 0;
+    return ((Math.round(degrees / 90) * 90) % 360 + 360) % 360;
+  }
+
+  function isQuarterTurn(rotation) {
+    return normalizeRotation(rotation) % 180 !== 0;
   }
 
   function makeId() {
@@ -406,13 +417,12 @@
     element.dataset.type = "image";
     element.style.left = `${note.x}px`;
     element.style.top = `${note.y}px`;
-    element.style.width = `${note.width || 320}px`;
-    element.style.height = `${note.height || 180}px`;
 
     const image = document.createElement("img");
     image.alt = "Pasted image";
     image.draggable = false;
     element.appendChild(image);
+    applyImageGeometry(element, note);
     loadImageIntoElement(note, image);
 
     element.addEventListener("pointerdown", (event) => {
@@ -423,8 +433,7 @@
   }
 
   function updateImageElement(element, note) {
-    element.style.width = `${note.width || 320}px`;
-    element.style.height = `${note.height || 180}px`;
+    applyImageGeometry(element, note);
 
     const image = element.querySelector("img");
     if (!image) {
@@ -434,6 +443,25 @@
     if (image.dataset.imageId !== note.imageId) {
       loadImageIntoElement(note, image);
     }
+  }
+
+  function applyImageGeometry(element, note) {
+    const width = note.width || 320;
+    const height = note.height || 180;
+    const rotation = normalizeRotation(note.rotation);
+    const image = element.querySelector("img");
+
+    element.style.width = `${width}px`;
+    element.style.height = `${height}px`;
+    element.dataset.rotation = String(rotation);
+
+    if (!image) {
+      return;
+    }
+
+    image.style.width = `${isQuarterTurn(rotation) ? height : width}px`;
+    image.style.height = `${isQuarterTurn(rotation) ? width : height}px`;
+    image.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
   }
 
   function setSelectedNotes(ids) {
@@ -567,6 +595,38 @@
       items.push(item);
     }
     return items;
+  }
+
+  function captureNoteSnapshots(ids) {
+    return ids
+      .map((id) => findNote(id))
+      .filter(Boolean)
+      .map((note) => ({ note: cloneNote(note) }));
+  }
+
+  function restoreNoteSnapshots(items) {
+    const restoredIds = [];
+    for (const item of items) {
+      if (!item?.note) {
+        continue;
+      }
+
+      const index = notes.findIndex((note) => note.id === item.note.id);
+      if (index === -1) {
+        continue;
+      }
+
+      notes[index] = cloneNote(item.note);
+      restoredIds.push(item.note.id);
+    }
+
+    if (!restoredIds.length) {
+      return;
+    }
+
+    renderSyncedNotes();
+    setSelectedNotes(restoredIds);
+    saveNotesNow();
   }
 
   function getClipboardBounds(items) {
@@ -1508,6 +1568,7 @@
       y: Math.round(point.y - displaySize.height / 2 + offset),
       width: displaySize.width,
       height: displaySize.height,
+      rotation: 0,
     };
   }
 
@@ -1679,6 +1740,44 @@
     await pasteImageBlobs(images, activeTextNote);
   }
 
+  function getSelectedImageNotes() {
+    return notes.filter((note) => selectedNoteIds.has(note.id) && note.type === "image");
+  }
+
+  function rotateSelectedImages(direction) {
+    const imageNotes = getSelectedImageNotes();
+    if (!imageNotes.length) {
+      return false;
+    }
+
+    const snapshots = captureNoteSnapshots(imageNotes.map((note) => note.id));
+
+    for (const note of imageNotes) {
+      const centerX = note.x + (note.width || 320) / 2;
+      const centerY = note.y + (note.height || 180) / 2;
+      const nextWidth = note.height || 180;
+      const nextHeight = note.width || 320;
+
+      note.rotation = normalizeRotation((note.rotation || 0) + direction * 90);
+      note.width = nextWidth;
+      note.height = nextHeight;
+      note.x = Math.round(centerX - nextWidth / 2);
+      note.y = Math.round(centerY - nextHeight / 2);
+
+      const element = paper.querySelector(`[data-id="${CSS.escape(note.id)}"]`);
+      if (element) {
+        element.style.left = `${note.x}px`;
+        element.style.top = `${note.y}px`;
+        updateImageElement(element, note);
+      }
+    }
+
+    pushUndoAction({ type: "update", items: snapshots });
+    saveNotesNow();
+    showPasteStatus(`Rotated ${imageNotes.length} image${imageNotes.length === 1 ? "" : "s"}`);
+    return true;
+  }
+
   async function deleteSelectedNotes() {
     if (!selectedNoteIds.size || undoInProgress) {
       return;
@@ -1742,6 +1841,11 @@
 
       if (action.type === "delete") {
         await restoreDeletedItems(action.items || []);
+        return;
+      }
+
+      if (action.type === "update") {
+        restoreNoteSnapshots(action.items || []);
       }
     } finally {
       undoInProgress = false;
@@ -2013,6 +2117,21 @@
       event.preventDefault();
       removeActiveEmptyTextNote(activeTextNote);
       deleteSelectedNotes();
+      return;
+    }
+
+    if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      event.key.toLocaleLowerCase() === "r" &&
+      selectedNoteIds.size &&
+      shouldUseBoardShortcut(activeTextNote) &&
+      getSelectedImageNotes().length
+    ) {
+      event.preventDefault();
+      removeActiveEmptyTextNote(activeTextNote);
+      rotateSelectedImages(event.shiftKey ? -1 : 1);
       return;
     }
 
