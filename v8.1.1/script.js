@@ -1294,6 +1294,38 @@
     return images;
   }
 
+  async function readSystemClipboardImages() {
+    if (!navigator.clipboard?.read) {
+      return [];
+    }
+
+    const images = [];
+    const seen = new Set();
+
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        const imageType = item.types.find((type) => type.startsWith("image/"));
+        if (!imageType) {
+          continue;
+        }
+
+        const blob = await item.getType(imageType);
+        const key = `${blob.type}:${blob.size}`;
+        if (seen.has(key)) {
+          continue;
+        }
+
+        seen.add(key);
+        images.push(blob);
+      }
+    } catch {
+      return [];
+    }
+
+    return images;
+  }
+
   function getDisplaySize(width, height) {
     const naturalWidth = Math.max(1, width || pastedImageMaxWidth);
     const naturalHeight = Math.max(1, height || pastedImageMaxHeight);
@@ -1391,33 +1423,11 @@
     }
   }
 
-  async function handlePaste(event) {
-    if (findBar.contains(document.activeElement)) {
-      return;
-    }
-
-    if (boardCopyPromise) {
-      await boardCopyPromise;
-    }
-
-    const activeTextNote = getActiveTextNoteElement();
-    const images = getClipboardImages(event);
-    if (
-      boardClipboard &&
-      shouldUseBoardShortcut(activeTextNote) &&
-      (!images.length || clipboardMatchesBoardClipboard(images))
-    ) {
-      event.preventDefault();
-      removeActiveEmptyTextNote(activeTextNote);
-      pasteBoardClipboard();
-      return;
-    }
-
+  async function pasteImageBlobs(images, activeTextNote) {
     if (!images.length) {
-      return;
+      return false;
     }
 
-    event.preventDefault();
     syncNotesFromDom();
     if (shouldUseBoardShortcut(activeTextNote)) {
       removeActiveEmptyTextNote(activeTextNote);
@@ -1442,6 +1452,42 @@
       pushUndoAction({ type: "add", ids: addedIds });
       saveNotesNow();
     }
+
+    return addedIds.length > 0;
+  }
+
+  async function handlePaste(event) {
+    if (findBar.contains(document.activeElement)) {
+      return;
+    }
+
+    if (boardCopyPromise) {
+      await boardCopyPromise;
+    }
+
+    const activeTextNote = getActiveTextNoteElement();
+    let images = getClipboardImages(event);
+    if (!images.length) {
+      images = await readSystemClipboardImages();
+    }
+
+    if (
+      boardClipboard &&
+      shouldUseBoardShortcut(activeTextNote) &&
+      (!images.length || clipboardMatchesBoardClipboard(images))
+    ) {
+      event.preventDefault();
+      removeActiveEmptyTextNote(activeTextNote);
+      pasteBoardClipboard();
+      return;
+    }
+
+    if (!images.length) {
+      return;
+    }
+
+    event.preventDefault();
+    await pasteImageBlobs(images, activeTextNote);
   }
 
   async function deleteSelectedNotes() {
