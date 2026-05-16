@@ -27,5 +27,6 @@ Changes from `v1`:
 - Press `Ctrl` + `C` to copy selected notes/images, click the target spot, then `Ctrl` + `V` to paste there.
 - Press `Delete` or `Backspace` to remove selected notes/images.
 - Press `Ctrl` + `Z` to undo the latest pasted image, created text wall, or selected-item deletion.
+- Press `Ctrl` + `Y` or `Ctrl` + `Shift` + `Z` to redo an accidental undo.
 - On first open, this version copies existing `v8.1` notes into `v8.1.1` storage if `v8.1.1` is empty.
 - Browser storage is separate from earlier versions, so each version can be tested independently.

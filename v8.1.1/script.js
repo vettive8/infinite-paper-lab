@@ -33,6 +33,7 @@
   let dirtyNoteIds = new Set();
   let selectedNoteIds = new Set();
   let undoStack = [];
+  let redoStack = [];
   let undoInProgress = false;
   let boardClipboard = null;
   let boardCopyPromise = null;
@@ -539,26 +540,45 @@
     removeNote(activeNote.dataset.id);
   }
 
-  function pushUndoAction(action) {
-    undoStack.push(action);
-    if (undoStack.length > 20) {
-      undoStack.shift();
+  function trimActionStack(stack) {
+    if (stack.length > 20) {
+      stack.shift();
     }
   }
 
-  function removeUndoAddReferences(ids) {
-    const idSet = new Set(ids);
-    undoStack = undoStack
+  function pushUndoAction(action, options = {}) {
+    undoStack.push(action);
+    trimActionStack(undoStack);
+    if (options.clearRedo !== false) {
+      redoStack = [];
+    }
+  }
+
+  function pushRedoAction(action) {
+    redoStack.push(action);
+    trimActionStack(redoStack);
+  }
+
+  function removeIdsFromAddActions(stack, idSet) {
+    return stack
       .map((action) => {
         if (action.type !== "add") {
           return action;
         }
+
         return {
           ...action,
           ids: (action.ids || []).filter((id) => !idSet.has(id)),
+          items: (action.items || []).filter((item) => !idSet.has(item?.note?.id)),
         };
       })
-      .filter((action) => action.type !== "add" || action.ids.length);
+      .filter((action) => action.type !== "add" || (action.ids || []).length || (action.items || []).length);
+  }
+
+  function removeUndoAddReferences(ids) {
+    const idSet = new Set(ids);
+    undoStack = removeIdsFromAddActions(undoStack, idSet);
+    redoStack = removeIdsFromAddActions(redoStack, idSet);
 
     for (const id of idSet) {
       textAddUndoIds.delete(id);
@@ -1822,11 +1842,36 @@
       setSelectedNotes(restoredIds);
       saveNotesNow();
     }
+
+    return restoredIds;
+  }
+
+  function getActionIds(action) {
+    if ((action.ids || []).length) {
+      return action.ids;
+    }
+
+    return (action.items || [])
+      .map((item) => item?.note?.id)
+      .filter(Boolean);
+  }
+
+  function getActionName(action) {
+    if (action.type === "add") {
+      return "addition";
+    }
+    if (action.type === "delete") {
+      return "deletion";
+    }
+    if (action.type === "update") {
+      return "change";
+    }
+    return "action";
   }
 
   async function undoLastAction() {
     if (undoInProgress || !undoStack.length) {
-      return;
+      return false;
     }
 
     undoInProgress = true;
@@ -1834,22 +1879,81 @@
       syncNotesFromDom();
       const action = undoStack.pop();
       if (action.type === "add") {
-        removeNotes(action.ids || [], { save: false });
+        const redoItems = (action.items || []).length
+          ? action.items
+          : await captureUndoItems(getActionIds(action));
+        removeNotes(getActionIds(action), { save: false });
         saveNotesNow();
-        return;
+        if (redoItems.length) {
+          pushRedoAction({ type: "add", items: redoItems });
+        }
+        showPasteStatus(`Undid ${getActionName(action)}. Ctrl+Y to redo`);
+        return true;
       }
 
       if (action.type === "delete") {
         await restoreDeletedItems(action.items || []);
-        return;
+        pushRedoAction(action);
+        showPasteStatus(`Undid ${getActionName(action)}. Ctrl+Y to redo`);
+        return true;
       }
 
       if (action.type === "update") {
+        const redoItems = captureNoteSnapshots(getActionIds(action));
         restoreNoteSnapshots(action.items || []);
+        if (redoItems.length) {
+          pushRedoAction({ type: "update", items: redoItems });
+        }
+        showPasteStatus(`Undid ${getActionName(action)}. Ctrl+Y to redo`);
+        return true;
       }
     } finally {
       undoInProgress = false;
     }
+
+    return false;
+  }
+
+  async function redoLastAction() {
+    if (undoInProgress || !redoStack.length) {
+      return false;
+    }
+
+    undoInProgress = true;
+    try {
+      syncNotesFromDom();
+      const action = redoStack.pop();
+      if (action.type === "add") {
+        const restoredIds = await restoreDeletedItems(action.items || []);
+        if (restoredIds.length) {
+          pushUndoAction({ type: "add", ids: restoredIds, items: action.items || [] }, { clearRedo: false });
+        }
+        showPasteStatus(`Redid ${getActionName(action)}`);
+        return true;
+      }
+
+      if (action.type === "delete") {
+        removeNotes(getActionIds(action), { save: false });
+        saveNotesNow();
+        pushUndoAction(action, { clearRedo: false });
+        showPasteStatus(`Redid ${getActionName(action)}`);
+        return true;
+      }
+
+      if (action.type === "update") {
+        const undoItems = captureNoteSnapshots(getActionIds(action));
+        restoreNoteSnapshots(action.items || []);
+        if (undoItems.length) {
+          pushUndoAction({ type: "update", items: undoItems }, { clearRedo: false });
+        }
+        showPasteStatus(`Redid ${getActionName(action)}`);
+        return true;
+      }
+    } finally {
+      undoInProgress = false;
+    }
+
+    return false;
   }
 
   async function undoOrDeleteSelection() {
@@ -2096,6 +2200,28 @@
         boardCopyPromise = copySelectedNotes().finally(() => {
           boardCopyPromise = null;
         });
+      }
+      return;
+    }
+
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.shiftKey &&
+      event.key.toLocaleLowerCase() === "z"
+    ) {
+      if (shouldUseBoardShortcut(activeTextNote) && redoStack.length) {
+        event.preventDefault();
+        removeActiveEmptyTextNote(activeTextNote);
+        redoLastAction();
+      }
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "y") {
+      if (shouldUseBoardShortcut(activeTextNote) && redoStack.length) {
+        event.preventDefault();
+        removeActiveEmptyTextNote(activeTextNote);
+        redoLastAction();
       }
       return;
     }
