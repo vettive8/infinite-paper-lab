@@ -19,7 +19,7 @@ Changes from `v1`:
 - While dragging, selected notes snap to nearby note edges and centers.
 - Press `Shift` + an arrow key while editing a text wall to jump to the nearest text wall in that direction.
 - Paste a screenshot or image with `Ctrl` + `V` to add it to the visible board.
-- Pasted images can be selected with right-drag and moved with selected notes.
+- Pasted images can be selected with left-click or right-drag and moved with selected notes.
 - Press `Ctrl` + `C` to copy selected notes/images, click the target spot, then `Ctrl` + `V` to paste there.
 - Press `Delete` or `Backspace` to remove selected notes/images.
 - Press `Ctrl` + `Z` to undo the latest pasted image, created text wall, or selected-item deletion.

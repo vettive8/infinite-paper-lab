@@ -303,10 +303,18 @@
   }
 
   function handleBoardItemPointerDown(event, noteId) {
+    const note = findNote(noteId);
     if (event.button === 2) {
       event.preventDefault();
       event.stopPropagation();
       startSelectionDrag(event, noteId);
+      return;
+    }
+
+    if (event.button === 0 && note && !isTextNote(note) && !selectedNoteIds.has(noteId)) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedNotes([noteId]);
       return;
     }
 
