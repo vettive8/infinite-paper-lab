@@ -1261,18 +1261,35 @@
     };
   }
 
-  function addClipboardImage(images, seen, blob) {
-    if (!blob?.type?.startsWith("image/")) {
+  function normalizeClipboardImageBlob(blob, fallbackType = "") {
+    if (!blob) {
+      return null;
+    }
+
+    if (blob.type?.startsWith("image/")) {
+      return blob;
+    }
+
+    if (fallbackType.startsWith("image/")) {
+      return new Blob([blob], { type: fallbackType });
+    }
+
+    return null;
+  }
+
+  function addClipboardImage(images, seen, blob, fallbackType = "") {
+    const imageBlob = normalizeClipboardImageBlob(blob, fallbackType);
+    if (!imageBlob) {
       return;
     }
 
-    const key = `${blob.type}:${blob.size}`;
+    const key = `${imageBlob.type}:${imageBlob.size}`;
     if (seen.has(key)) {
       return;
     }
 
     seen.add(key);
-    images.push(blob);
+    images.push(imageBlob);
   }
 
   function getDataTransferImages(dataTransfer) {
@@ -1287,7 +1304,7 @@
       if (item.kind !== "file" || !item.type.startsWith("image/")) {
         continue;
       }
-      addClipboardImage(images, seen, item.getAsFile());
+      addClipboardImage(images, seen, item.getAsFile(), item.type);
     }
 
     for (const file of Array.from(dataTransfer.files || [])) {
@@ -1379,7 +1396,7 @@
           continue;
         }
 
-        addClipboardImage(images, seen, await item.getType(imageType));
+        addClipboardImage(images, seen, await item.getType(imageType), imageType);
       }
     } catch {
       return [];
