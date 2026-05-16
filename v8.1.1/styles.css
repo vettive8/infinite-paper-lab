@@ -71,6 +71,30 @@ body {
   display: none;
 }
 
+.paste-status {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 25;
+  padding: 6px 9px;
+  border: 1px solid #d8d8d8;
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 12%);
+  font: 12px/1.2 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  pointer-events: none;
+}
+
+.paste-status.is-error {
+  border-color: #e3a4a4;
+  color: #9b1c1c;
+}
+
+.paste-status[hidden] {
+  display: none;
+}
+
 ::highlight(find-active) {
   background: #f4d84e;
   color: #111;

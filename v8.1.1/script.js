@@ -41,6 +41,7 @@
   let keyboardImagePasteProbe = 0;
   let lastImagePasteSignature = "";
   let lastImagePasteAt = 0;
+  let pasteStatusTimer = 0;
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -465,6 +466,24 @@
 
   function getActiveTextNoteElement() {
     return document.activeElement?.classList.contains("note") ? document.activeElement : null;
+  }
+
+  function showPasteStatus(message, isError = false) {
+    let status = document.getElementById("paste-status");
+    if (!status) {
+      status = document.createElement("div");
+      status.id = "paste-status";
+      status.className = "paste-status";
+      document.body.appendChild(status);
+    }
+
+    status.textContent = message;
+    status.classList.toggle("is-error", isError);
+    status.hidden = false;
+    window.clearTimeout(pasteStatusTimer);
+    pasteStatusTimer = window.setTimeout(() => {
+      status.hidden = true;
+    }, 1800);
   }
 
   function hasSelectionOutsideActiveNote(activeNote) {
@@ -1573,8 +1592,8 @@
         notes.push(note);
         paper.appendChild(createNoteElement(note));
         addedIds.push(note.id);
-      } catch {
-        // Keep the paste action best-effort so one bad image does not block the others.
+      } catch (error) {
+        console.warn("Image paste failed", error);
       }
     }
 
@@ -1583,6 +1602,9 @@
       pushUndoAction({ type: "add", ids: addedIds });
       rememberImagePaste(images);
       saveNotesNow();
+      showPasteStatus(`Pasted ${addedIds.length} image${addedIds.length === 1 ? "" : "s"}`);
+    } else {
+      showPasteStatus("Image paste failed", true);
     }
 
     return addedIds.length > 0;
@@ -1606,7 +1628,7 @@
       images = await getImageBlobsFromDataUrls(imageDataUrls);
     }
 
-    if (!images.length && (!hasReadableText || shouldUseBoardShortcut(activeTextNote))) {
+    if (!images.length) {
       images = await readFallbackClipboardImages();
     }
 
@@ -1947,7 +1969,18 @@
     const activeTextNote = getActiveTextNoteElement();
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "v") {
-      if (shouldUseBoardShortcut(activeTextNote)) {
+      if (event.shiftKey) {
+        event.preventDefault();
+        readBridgeClipboardImages()
+          .then((images) => {
+            if (!images.length) {
+              showPasteStatus("No image found in Windows clipboard", true);
+              return false;
+            }
+            return pasteImageBlobs(images, activeTextNote);
+          })
+          .catch(() => showPasteStatus("Windows clipboard bridge is not running", true));
+      } else {
         probeKeyboardImagePaste(activeTextNote).catch(() => {});
       }
       return;

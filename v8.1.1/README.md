@@ -21,6 +21,7 @@ Changes from `v1`:
 - Paste a screenshot or image with `Ctrl` + `V` to add it to the visible board.
 - `clipboard-bridge.ps1` is a local Windows fallback for screenshot paste when Chrome does not expose the image clipboard directly.
 - Run it with `powershell -NoProfile -STA -ExecutionPolicy Bypass -File .\v8.1.1\clipboard-bridge.ps1` if image paste stops after restarting the computer.
+- `Ctrl` + `Shift` + `V` forces the Windows clipboard bridge path for screenshots/images.
 - Pasted images can be selected with left-click or right-drag and moved with selected notes.
 - Press `Ctrl` + `C` to copy selected notes/images, click the target spot, then `Ctrl` + `V` to paste there.
 - Press `Delete` or `Backspace` to remove selected notes/images.
