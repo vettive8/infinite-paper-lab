@@ -322,6 +322,11 @@
   function handleBoardItemPointerDown(event, noteId) {
     const note = findNote(noteId);
     if (event.button === 2) {
+      if (note && isTextNote(note)) {
+        event.stopPropagation();
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
       startSelectionDrag(event, noteId);
@@ -2081,6 +2086,10 @@
   });
 
   viewport.addEventListener("contextmenu", (event) => {
+    if (event.target.closest(".note")) {
+      return;
+    }
+
     event.preventDefault();
   });
 
