@@ -36,6 +36,7 @@
   let boardClipboard = null;
   let boardCopyPromise = null;
   let textAddUndoIds = new Set();
+  let lastPasteTargetPoint = null;
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -537,6 +538,20 @@
     return items;
   }
 
+  function getClipboardBounds(items) {
+    const left = Math.min(...items.map((item) => item.note.x));
+    const top = Math.min(...items.map((item) => item.note.y));
+    const right = Math.max(...items.map((item) => item.note.x + item.width));
+    const bottom = Math.max(...items.map((item) => item.note.y + item.height));
+
+    return {
+      left,
+      top,
+      right,
+      bottom,
+    };
+  }
+
   async function writeSystemClipboard(items) {
     if (!navigator.clipboard) {
       return;
@@ -576,6 +591,7 @@
 
     boardClipboard = {
       items,
+      bounds: getClipboardBounds(items),
       pasteCount: 0,
     };
     writeSystemClipboard(items).catch(() => {});
@@ -789,11 +805,15 @@
 
   function addNoteAt(clientX, clientY) {
     const point = viewportToWorld(clientX, clientY);
+    lastPasteTargetPoint = {
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+    };
     const note = {
       id: makeId(),
       type: "text",
-      x: Math.round(point.x),
-      y: Math.round(point.y),
+      x: lastPasteTargetPoint.x,
+      y: lastPasteTargetPoint.y,
       text: "",
     };
     notes.push(note);
@@ -1323,13 +1343,20 @@
 
     syncNotesFromDom();
 
-    const offset = (boardClipboard.pasteCount + 1) * 28;
+    const repeatOffset = boardClipboard.pasteCount * 28;
+    const fallbackOffset = (boardClipboard.pasteCount + 1) * 28;
+    const offsetX = lastPasteTargetPoint && boardClipboard.bounds
+      ? lastPasteTargetPoint.x - boardClipboard.bounds.left + repeatOffset
+      : fallbackOffset;
+    const offsetY = lastPasteTargetPoint && boardClipboard.bounds
+      ? lastPasteTargetPoint.y - boardClipboard.bounds.top + repeatOffset
+      : fallbackOffset;
     const addedIds = [];
 
     for (const item of boardClipboard.items) {
       const note = cloneNote(item.note);
-      note.x = Math.round(item.note.x + offset);
-      note.y = Math.round(item.note.y + offset);
+      note.x = Math.round(item.note.x + offsetX);
+      note.y = Math.round(item.note.y + offsetY);
 
       if (note.type === "image") {
         if (!item.blob) {
@@ -1373,6 +1400,7 @@
       (!images.length || clipboardMatchesBoardClipboard(images))
     ) {
       event.preventDefault();
+      removeActiveEmptyTextNote(activeTextNote);
       pasteBoardClipboard();
       return;
     }
@@ -1383,8 +1411,11 @@
 
     event.preventDefault();
     syncNotesFromDom();
+    if (shouldUseBoardShortcut(activeTextNote)) {
+      removeActiveEmptyTextNote(activeTextNote);
+    }
 
-    const point = getViewportCenterWorld();
+    const point = lastPasteTargetPoint || getViewportCenterWorld();
     const addedIds = [];
 
     for (let index = 0; index < images.length; index += 1) {
