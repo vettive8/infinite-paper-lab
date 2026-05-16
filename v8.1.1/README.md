@@ -17,6 +17,7 @@ Changes from `v1`:
 - Right-click a note to select just that note.
 - Hold the left mouse button on a selected note and drag to move the selected notes.
 - While dragging, selected notes snap to nearby note edges and centers.
+- Press `Shift` + an arrow key while editing a text wall to jump to the nearest text wall in that direction.
 - Paste a screenshot or image with `Ctrl` + `V` to add it to the visible board.
 - Pasted images can be selected with right-drag and moved with selected notes.
 - Press `Ctrl` + `C` to copy selected notes/images, then `Ctrl` + `V` to paste a duplicate.

@@ -372,6 +372,9 @@
     });
 
     element.addEventListener("keydown", (event) => {
+      if (handleTextWallNavigation(event, element)) {
+        return;
+      }
       if (event.key === "Escape") {
         element.blur();
         window.getSelection()?.removeAllRanges();
@@ -676,6 +679,112 @@
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
+  }
+
+  function focusAtStart(element) {
+    element.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function getKeyboardDirection(event) {
+    const directions = {
+      ArrowLeft: "left",
+      ArrowRight: "right",
+      ArrowUp: "up",
+      ArrowDown: "down",
+    };
+    return directions[event.key] || null;
+  }
+
+  function getIntervalDistance(value, start, end) {
+    if (value < start) {
+      return start - value;
+    }
+    if (value > end) {
+      return value - end;
+    }
+    return 0;
+  }
+
+  function getDirectionalScore(currentRect, candidateRect, direction) {
+    const currentCenterX = currentRect.left + currentRect.width / 2;
+    const currentCenterY = currentRect.top + currentRect.height / 2;
+    const candidateCenterX = candidateRect.left + candidateRect.width / 2;
+    const candidateCenterY = candidateRect.top + candidateRect.height / 2;
+
+    if (direction === "left" && candidateCenterX < currentCenterX) {
+      return currentCenterX - candidateCenterX + getIntervalDistance(candidateCenterY, currentRect.top, currentRect.bottom) * 2;
+    }
+    if (direction === "right" && candidateCenterX > currentCenterX) {
+      return candidateCenterX - currentCenterX + getIntervalDistance(candidateCenterY, currentRect.top, currentRect.bottom) * 2;
+    }
+    if (direction === "up" && candidateCenterY < currentCenterY) {
+      return currentCenterY - candidateCenterY + getIntervalDistance(candidateCenterX, currentRect.left, currentRect.right) * 2;
+    }
+    if (direction === "down" && candidateCenterY > currentCenterY) {
+      return candidateCenterY - currentCenterY + getIntervalDistance(candidateCenterX, currentRect.left, currentRect.right) * 2;
+    }
+
+    return Infinity;
+  }
+
+  function findTextWallInDirection(activeElement, direction) {
+    const currentRect = activeElement.getBoundingClientRect();
+    let bestElement = null;
+    let bestScore = Infinity;
+
+    for (const element of paper.querySelectorAll(".note")) {
+      if (element === activeElement || !getNoteText(element).trim()) {
+        continue;
+      }
+
+      const score = getDirectionalScore(currentRect, element.getBoundingClientRect(), direction);
+      if (score < bestScore) {
+        bestScore = score;
+        bestElement = element;
+      }
+    }
+
+    return bestElement;
+  }
+
+  function focusTextWallForDirection(element, direction) {
+    setSelectedNotes([element.dataset.id]);
+    if (direction === "right" || direction === "down") {
+      focusAtStart(element);
+    } else {
+      focusAtEnd(element);
+    }
+  }
+
+  function handleTextWallNavigation(event, activeElement) {
+    const direction = getKeyboardDirection(event);
+    if (!direction || !event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+      return false;
+    }
+
+    const targetElement = findTextWallInDirection(activeElement, direction);
+    if (!targetElement) {
+      return false;
+    }
+
+    const currentNote = findNote(activeElement.dataset.id);
+    if (currentNote) {
+      currentNote.text = getNoteText(activeElement);
+      recordTextAddUndo(currentNote.id, currentNote.text);
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    removeActiveEmptyTextNote(activeElement);
+    focusTextWallForDirection(targetElement, direction);
+    saveNotesSoon();
+    return true;
   }
 
   function addNoteAt(clientX, clientY) {
