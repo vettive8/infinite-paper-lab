@@ -37,6 +37,9 @@
   let boardCopyPromise = null;
   let textAddUndoIds = new Set();
   let lastPasteTargetPoint = null;
+  let keyboardImagePasteProbe = 0;
+  let lastImagePasteSignature = "";
+  let lastImagePasteAt = 0;
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -1258,40 +1261,106 @@
     };
   }
 
-  function getClipboardImages(event) {
-    const clipboard = event.clipboardData;
-    if (!clipboard) {
+  function addClipboardImage(images, seen, blob) {
+    if (!blob?.type?.startsWith("image/")) {
+      return;
+    }
+
+    const key = `${blob.type}:${blob.size}`;
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    images.push(blob);
+  }
+
+  function getDataTransferImages(dataTransfer) {
+    if (!dataTransfer) {
       return [];
     }
 
     const images = [];
     const seen = new Set();
-    const addImageFile = (file) => {
-      if (!file?.type?.startsWith("image/")) {
-        return;
-      }
 
-      const key = `${file.type}:${file.size}`;
-      if (seen.has(key)) {
-        return;
-      }
-
-      seen.add(key);
-      images.push(file);
-    };
-
-    for (const item of Array.from(clipboard.items || [])) {
+    for (const item of Array.from(dataTransfer.items || [])) {
       if (item.kind !== "file" || !item.type.startsWith("image/")) {
         continue;
       }
-      addImageFile(item.getAsFile());
+      addClipboardImage(images, seen, item.getAsFile());
     }
 
-    for (const file of Array.from(clipboard.files || [])) {
-      addImageFile(file);
+    for (const file of Array.from(dataTransfer.files || [])) {
+      addClipboardImage(images, seen, file);
     }
 
     return images;
+  }
+
+  function getDataTransferText(dataTransfer, type) {
+    try {
+      return dataTransfer?.getData(type) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getDataTransferImageDataUrls(dataTransfer) {
+    if (!dataTransfer) {
+      return [];
+    }
+
+    const urls = [];
+    const seen = new Set();
+    const addUrl = (value) => {
+      if (!value || !value.startsWith("data:image/") || seen.has(value)) {
+        return;
+      }
+      seen.add(value);
+      urls.push(value);
+    };
+
+    const html = getDataTransferText(dataTransfer, "text/html");
+    if (html) {
+      const documentFragment = document.implementation.createHTMLDocument("");
+      documentFragment.body.innerHTML = html;
+      for (const image of documentFragment.body.querySelectorAll("img")) {
+        addUrl(image.getAttribute("src") || "");
+      }
+    }
+
+    const text = getDataTransferText(dataTransfer, "text/plain").trim();
+    addUrl(text);
+
+    return urls;
+  }
+
+  function dataTransferHasReadableText(dataTransfer) {
+    return Boolean(
+      getDataTransferText(dataTransfer, "text/plain").trim() ||
+        getDataTransferText(dataTransfer, "text/html").trim()
+    );
+  }
+
+  async function getImageBlobsFromDataUrls(dataUrls) {
+    const images = [];
+    const seen = new Set();
+
+    for (const dataUrl of dataUrls) {
+      try {
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        addClipboardImage(images, seen, blob);
+      } catch {
+        // Some clipboard providers include broken HTML fragments. Ignore those.
+      }
+    }
+
+    return images;
+  }
+
+  function getClipboardImages(event) {
+    return getDataTransferImages(event.clipboardData);
   }
 
   async function readSystemClipboardImages() {
@@ -1310,20 +1379,31 @@
           continue;
         }
 
-        const blob = await item.getType(imageType);
-        const key = `${blob.type}:${blob.size}`;
-        if (seen.has(key)) {
-          continue;
-        }
-
-        seen.add(key);
-        images.push(blob);
+        addClipboardImage(images, seen, await item.getType(imageType));
       }
     } catch {
       return [];
     }
 
     return images;
+  }
+
+  function getImagePasteSignature(images) {
+    return images.map((image) => `${image.type || "image"}:${image.size || 0}`).join("|");
+  }
+
+  function isRecentImagePaste(images) {
+    const signature = getImagePasteSignature(images);
+    return Boolean(
+      signature &&
+        signature === lastImagePasteSignature &&
+        performance.now() - lastImagePasteAt < 400
+    );
+  }
+
+  function rememberImagePaste(images) {
+    lastImagePasteSignature = getImagePasteSignature(images);
+    lastImagePasteAt = performance.now();
   }
 
   function getDisplaySize(width, height) {
@@ -1428,6 +1508,10 @@
       return false;
     }
 
+    if (isRecentImagePaste(images)) {
+      return true;
+    }
+
     syncNotesFromDom();
     if (shouldUseBoardShortcut(activeTextNote)) {
       removeActiveEmptyTextNote(activeTextNote);
@@ -1450,6 +1534,7 @@
     if (addedIds.length) {
       setSelectedNotes(addedIds);
       pushUndoAction({ type: "add", ids: addedIds });
+      rememberImagePaste(images);
       saveNotesNow();
     }
 
@@ -1461,13 +1546,20 @@
       return;
     }
 
+    const activeTextNote = getActiveTextNoteElement();
+    let images = getClipboardImages(event);
+    const imageDataUrls = getDataTransferImageDataUrls(event.clipboardData);
+    const hasReadableText = dataTransferHasReadableText(event.clipboardData);
+
     if (boardCopyPromise) {
       await boardCopyPromise;
     }
 
-    const activeTextNote = getActiveTextNoteElement();
-    let images = getClipboardImages(event);
     if (!images.length) {
+      images = await getImageBlobsFromDataUrls(imageDataUrls);
+    }
+
+    if (!images.length && (!hasReadableText || shouldUseBoardShortcut(activeTextNote))) {
       images = await readSystemClipboardImages();
     }
 
@@ -1487,6 +1579,34 @@
     }
 
     event.preventDefault();
+    await pasteImageBlobs(images, activeTextNote);
+  }
+
+  async function handleBeforeInput(event) {
+    if (event.inputType !== "insertFromPaste" || findBar.contains(document.activeElement)) {
+      return;
+    }
+
+    const images = getDataTransferImages(event.dataTransfer);
+    if (!images.length) {
+      return;
+    }
+
+    event.preventDefault();
+    await pasteImageBlobs(images, getActiveTextNoteElement());
+  }
+
+  async function probeKeyboardImagePaste(activeTextNote) {
+    const probeId = ++keyboardImagePasteProbe;
+    const images = await readSystemClipboardImages();
+    if (probeId !== keyboardImagePasteProbe || !images.length || isRecentImagePaste(images)) {
+      return;
+    }
+
+    if (boardClipboard && clipboardMatchesBoardClipboard(images)) {
+      return;
+    }
+
     await pasteImageBlobs(images, activeTextNote);
   }
 
@@ -1683,7 +1803,8 @@
     event.preventDefault();
   });
 
-  window.addEventListener("paste", handlePaste);
+  document.addEventListener("beforeinput", handleBeforeInput, true);
+  document.addEventListener("paste", handlePaste, true);
 
   findBar.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
@@ -1777,6 +1898,13 @@
     }
 
     const activeTextNote = getActiveTextNoteElement();
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "v") {
+      if (shouldUseBoardShortcut(activeTextNote)) {
+        probeKeyboardImagePaste(activeTextNote).catch(() => {});
+      }
+      return;
+    }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "c") {
       if (selectedNoteIds.size && shouldUseBoardShortcut(activeTextNote)) {
