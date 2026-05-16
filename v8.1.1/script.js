@@ -462,7 +462,7 @@
 
     image.style.width = `${isQuarterTurn(rotation) ? height : width}px`;
     image.style.height = `${isQuarterTurn(rotation) ? width : height}px`;
-    image.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
+    image.style.transform = `rotate(${rotation}deg)`;
   }
 
   function setSelectedNotes(ids) {
@@ -1526,12 +1526,12 @@
   }
 
   async function readFallbackClipboardImages() {
-    const systemImages = await readSystemClipboardImages();
-    if (systemImages.length) {
-      return systemImages;
+    const bridgeImages = await readBridgeClipboardImages();
+    if (bridgeImages.length) {
+      return bridgeImages;
     }
 
-    return readBridgeClipboardImages();
+    return readSystemClipboardImages();
   }
 
   function getImagePasteSignature(images) {
@@ -1699,7 +1699,6 @@
     const activeTextNote = getActiveTextNoteElement();
     let images = getClipboardImages(event);
     const imageDataUrls = getDataTransferImageDataUrls(event.clipboardData);
-    const hasReadableText = dataTransferHasReadableText(event.clipboardData);
 
     if (boardCopyPromise) {
       await boardCopyPromise;
@@ -1722,6 +1721,11 @@
       removeActiveEmptyTextNote(activeTextNote);
       pasteBoardClipboard();
       return;
+    }
+
+    const bridgeImages = await readBridgeClipboardImages();
+    if (bridgeImages.length) {
+      images = bridgeImages;
     }
 
     if (!images.length) {

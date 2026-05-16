@@ -194,7 +194,9 @@ body {
 }
 
 .image-note {
-  display: block;
+  position: absolute;
+  display: grid;
+  place-items: center;
   width: 320px;
   height: 180px;
   margin: 0;
@@ -208,9 +210,6 @@ body {
 
 .image-note img {
   display: block;
-  position: absolute;
-  left: 50%;
-  top: 50%;
   object-fit: contain;
   pointer-events: none;
   transform-origin: center;
