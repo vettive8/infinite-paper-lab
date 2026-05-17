@@ -2190,12 +2190,14 @@
     }
 
     const wasClick = !activeDrag.moved && !activeDrag.panOnly && event.button === 0;
+    const clickX = activeDrag.startX;
+    const clickY = activeDrag.startY;
     viewport.releasePointerCapture(event.pointerId);
     viewport.classList.remove("is-panning");
     activeDrag = null;
 
     if (wasClick) {
-      addNoteAt(event.clientX, event.clientY);
+      addNoteAt(clickX, clickY);
     }
   }
 
