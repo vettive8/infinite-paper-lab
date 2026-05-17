@@ -13,9 +13,8 @@ Changes from `v1`:
 - `Ctrl` + `A` inside the find input keeps its normal select-all behavior.
 - Multiple tabs of `v8.1` update notes in real time on the same browser/computer.
 - Each tab keeps its own view position, so moving around in one tab does not move the others.
-- Hold the right mouse button on blank paper and drag to select note blocks.
-- Right-click text to use Chrome spelling suggestions or add words to the browser dictionary.
-- Right-click an image to select just that image.
+- Hold the right mouse button and drag to select note blocks.
+- Right-click a note to select just that note.
 - Hold the left mouse button on a selected note and drag to move the selected notes.
 - While dragging, selected notes snap to nearby note edges and centers.
 - Press `Shift` + an arrow key while editing a text wall to jump to the nearest text wall in that direction.
@@ -25,6 +24,8 @@ Changes from `v1`:
 - `Ctrl` + `Shift` + `V` forces the Windows clipboard bridge path for screenshots/images.
 - Pasted images can be selected with left-click or right-drag and moved with selected notes.
 - Press `R` to rotate selected images clockwise, or `Shift` + `R` to rotate counter-clockwise. Text does not rotate.
+- Drag the round handle on a selected image to rotate it at any angle.
+- Drag the square corner handle on a selected image to stretch, shrink, or enlarge it.
 - Press `Ctrl` + `C` to copy selected notes/images, click the target spot, then `Ctrl` + `V` to paste there.
 - Press `Delete` or `Backspace` to remove selected notes/images.
 - Press `Ctrl` + `Z` to undo the latest pasted image, created text wall, or selected-item deletion.

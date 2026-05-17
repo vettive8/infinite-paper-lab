@@ -190,11 +190,7 @@
 
   function normalizeRotation(value) {
     const degrees = Number(value) || 0;
-    return ((Math.round(degrees / 90) * 90) % 360 + 360) % 360;
-  }
-
-  function isQuarterTurn(rotation) {
-    return normalizeRotation(rotation) % 180 !== 0;
+    return ((degrees % 360) + 360) % 360;
   }
 
   function makeId() {
@@ -310,6 +306,14 @@
     };
   }
 
+  function worldToViewport(worldX, worldY) {
+    const rect = viewport.getBoundingClientRect();
+    return {
+      x: rect.left + view.x + worldX * view.scale,
+      y: rect.top + view.y + worldY * view.scale,
+    };
+  }
+
   function getViewportCenterWorld() {
     const rect = viewport.getBoundingClientRect();
     return viewportToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -322,11 +326,6 @@
   function handleBoardItemPointerDown(event, noteId) {
     const note = findNote(noteId);
     if (event.button === 2) {
-      if (note && isTextNote(note)) {
-        event.stopPropagation();
-        return;
-      }
-
       event.preventDefault();
       event.stopPropagation();
       startSelectionDrag(event, noteId);
@@ -428,6 +427,31 @@
     image.alt = "Pasted image";
     image.draggable = false;
     element.appendChild(image);
+
+    const controls = document.createElement("div");
+    controls.className = "image-controls";
+    controls.setAttribute("aria-hidden", "true");
+
+    const rotateHandle = document.createElement("button");
+    rotateHandle.type = "button";
+    rotateHandle.className = "image-control image-rotate-control";
+    rotateHandle.title = "Drag to rotate";
+    rotateHandle.addEventListener("pointerdown", (event) => {
+      startImageTransform(event, noteId, "rotate");
+    });
+
+    const resizeHandle = document.createElement("button");
+    resizeHandle.type = "button";
+    resizeHandle.className = "image-control image-resize-control";
+    resizeHandle.title = "Drag to resize";
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      startImageTransform(event, noteId, "resize");
+    });
+
+    controls.appendChild(rotateHandle);
+    controls.appendChild(resizeHandle);
+    element.appendChild(controls);
+
     applyImageGeometry(element, note);
     loadImageIntoElement(note, image);
 
@@ -459,15 +483,16 @@
 
     element.style.width = `${width}px`;
     element.style.height = `${height}px`;
+    element.style.transform = `rotate(${rotation}deg)`;
     element.dataset.rotation = String(rotation);
 
     if (!image) {
       return;
     }
 
-    image.style.width = `${isQuarterTurn(rotation) ? height : width}px`;
-    image.style.height = `${isQuarterTurn(rotation) ? width : height}px`;
-    image.style.transform = `rotate(${rotation}deg)`;
+    image.style.width = "100%";
+    image.style.height = "100%";
+    image.style.transform = "";
   }
 
   function setSelectedNotes(ids) {
@@ -1782,21 +1807,10 @@
     const snapshots = captureNoteSnapshots(imageNotes.map((note) => note.id));
 
     for (const note of imageNotes) {
-      const centerX = note.x + (note.width || 320) / 2;
-      const centerY = note.y + (note.height || 180) / 2;
-      const nextWidth = note.height || 180;
-      const nextHeight = note.width || 320;
-
       note.rotation = normalizeRotation((note.rotation || 0) + direction * 90);
-      note.width = nextWidth;
-      note.height = nextHeight;
-      note.x = Math.round(centerX - nextWidth / 2);
-      note.y = Math.round(centerY - nextHeight / 2);
 
       const element = paper.querySelector(`[data-id="${CSS.escape(note.id)}"]`);
       if (element) {
-        element.style.left = `${note.x}px`;
-        element.style.top = `${note.y}px`;
         updateImageElement(element, note);
       }
     }
@@ -1805,6 +1819,100 @@
     saveNotesNow();
     showPasteStatus(`Rotated ${imageNotes.length} image${imageNotes.length === 1 ? "" : "s"}`);
     return true;
+  }
+
+  function getPointerAngle(clientX, clientY, center) {
+    return Math.atan2(clientY - center.y, clientX - center.x) * (180 / Math.PI);
+  }
+
+  function startImageTransform(event, noteId, transformType) {
+    const note = findNote(noteId);
+    if (!note || note.type !== "image") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    syncNotesFromDom();
+    setSelectedNotes([noteId]);
+
+    const centerWorld = {
+      x: note.x + (note.width || 320) / 2,
+      y: note.y + (note.height || 180) / 2,
+    };
+    const centerClient = worldToViewport(centerWorld.x, centerWorld.y);
+
+    activeDrag = {
+      type: transformType === "rotate" ? "image-rotate" : "image-resize",
+      pointerId: event.pointerId,
+      noteId,
+      snapshots: captureNoteSnapshots([noteId]),
+      moved: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWorld: viewportToWorld(event.clientX, event.clientY),
+      startRotation: normalizeRotation(note.rotation),
+      startAngle: getPointerAngle(event.clientX, event.clientY, centerClient),
+      startWidth: note.width || 320,
+      startHeight: note.height || 180,
+      centerClient,
+    };
+
+    viewport.setPointerCapture(event.pointerId);
+    viewport.classList.add("is-transforming-image");
+  }
+
+  function updateImageTransformElement(note) {
+    const element = paper.querySelector(`[data-id="${CSS.escape(note.id)}"]`);
+    if (!element) {
+      return;
+    }
+
+    element.style.left = `${note.x}px`;
+    element.style.top = `${note.y}px`;
+    updateImageElement(element, note);
+  }
+
+  function rotateImageWithPointer(event) {
+    const note = findNote(activeDrag.noteId);
+    if (!note) {
+      return;
+    }
+
+    const currentAngle = getPointerAngle(event.clientX, event.clientY, activeDrag.centerClient);
+    const delta = currentAngle - activeDrag.startAngle;
+    note.rotation = normalizeRotation(activeDrag.startRotation + delta);
+    activeDrag.moved = true;
+    updateImageTransformElement(note);
+  }
+
+  function resizeImageWithPointer(event) {
+    const note = findNote(activeDrag.noteId);
+    if (!note) {
+      return;
+    }
+
+    const pointerWorld = viewportToWorld(event.clientX, event.clientY);
+    const dx = pointerWorld.x - activeDrag.startWorld.x;
+    const dy = pointerWorld.y - activeDrag.startWorld.y;
+    const radians = activeDrag.startRotation * (Math.PI / 180);
+    const localDx = dx * Math.cos(radians) + dy * Math.sin(radians);
+    const localDy = -dx * Math.sin(radians) + dy * Math.cos(radians);
+
+    note.width = Math.round(clamp(activeDrag.startWidth + localDx, 40, 4000));
+    note.height = Math.round(clamp(activeDrag.startHeight + localDy, 40, 4000));
+    activeDrag.moved = true;
+    updateImageTransformElement(note);
+  }
+
+  function endImageTransform() {
+    viewport.classList.remove("is-transforming-image");
+    if (!activeDrag.moved) {
+      return;
+    }
+
+    pushUndoAction({ type: "update", items: activeDrag.snapshots });
+    saveNotesNow();
   }
 
   async function deleteSelectedNotes() {
@@ -2029,6 +2137,16 @@
       return;
     }
 
+    if (activeDrag.type === "image-rotate") {
+      rotateImageWithPointer(event);
+      return;
+    }
+
+    if (activeDrag.type === "image-resize") {
+      resizeImageWithPointer(event);
+      return;
+    }
+
     const dx = event.clientX - activeDrag.startX;
     const dy = event.clientY - activeDrag.startY;
     const shouldPan = activeDrag.panOnly || Math.hypot(dx, dy) > panThreshold;
@@ -2064,6 +2182,13 @@
       return;
     }
 
+    if (activeDrag.type === "image-rotate" || activeDrag.type === "image-resize") {
+      viewport.releasePointerCapture(event.pointerId);
+      endImageTransform();
+      activeDrag = null;
+      return;
+    }
+
     const wasClick = !activeDrag.moved && !activeDrag.panOnly && event.button === 0;
     viewport.releasePointerCapture(event.pointerId);
     viewport.classList.remove("is-panning");
@@ -2083,13 +2208,10 @@
     viewport.classList.remove("is-panning");
     viewport.classList.remove("is-selecting");
     viewport.classList.remove("is-moving-selection");
+    viewport.classList.remove("is-transforming-image");
   });
 
   viewport.addEventListener("contextmenu", (event) => {
-    if (event.target.closest(".note")) {
-      return;
-    }
-
     event.preventDefault();
   });
 
