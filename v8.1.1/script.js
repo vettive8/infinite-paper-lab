@@ -143,6 +143,8 @@
           width: note.width,
           height: note.height,
           rotation: normalizeRotation(note.rotation),
+          flipX: Boolean(note.flipX),
+          flipY: Boolean(note.flipY),
         };
       }
 
@@ -181,6 +183,8 @@
         width: Number.isFinite(Number(note.width)) ? Math.round(Number(note.width)) : 320,
         height: Number.isFinite(Number(note.height)) ? Math.round(Number(note.height)) : 180,
         rotation: normalizeRotation(note.rotation),
+        flipX: Boolean(note.flipX),
+        flipY: Boolean(note.flipY),
       }));
   }
 
@@ -440,6 +444,36 @@
       startImageTransform(event, noteId, "rotate");
     });
 
+    const mirrorHorizontalButton = document.createElement("button");
+    mirrorHorizontalButton.type = "button";
+    mirrorHorizontalButton.className = "image-control image-mirror-control image-mirror-horizontal-control";
+    mirrorHorizontalButton.title = "Mirror horizontally";
+    mirrorHorizontalButton.textContent = "H";
+    mirrorHorizontalButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    mirrorHorizontalButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      mirrorSelectedImages("x");
+    });
+
+    const mirrorVerticalButton = document.createElement("button");
+    mirrorVerticalButton.type = "button";
+    mirrorVerticalButton.className = "image-control image-mirror-control image-mirror-vertical-control";
+    mirrorVerticalButton.title = "Mirror vertically";
+    mirrorVerticalButton.textContent = "V";
+    mirrorVerticalButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    mirrorVerticalButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      mirrorSelectedImages("y");
+    });
+
     const resizeHandle = document.createElement("button");
     resizeHandle.type = "button";
     resizeHandle.className = "image-control image-resize-control";
@@ -449,6 +483,8 @@
     });
 
     controls.appendChild(rotateHandle);
+    controls.appendChild(mirrorHorizontalButton);
+    controls.appendChild(mirrorVerticalButton);
     controls.appendChild(resizeHandle);
     element.appendChild(controls);
 
@@ -492,7 +528,9 @@
 
     image.style.width = "100%";
     image.style.height = "100%";
-    image.style.transform = "";
+    image.style.transform = `${note.flipX ? "scaleX(-1)" : "scaleX(1)"} ${
+      note.flipY ? "scaleY(-1)" : "scaleY(1)"
+    }`;
   }
 
   function setSelectedNotes(ids) {
@@ -1619,6 +1657,8 @@
       width: displaySize.width,
       height: displaySize.height,
       rotation: 0,
+      flipX: false,
+      flipY: false,
     };
   }
 
@@ -1818,6 +1858,34 @@
     pushUndoAction({ type: "update", items: snapshots });
     saveNotesNow();
     showPasteStatus(`Rotated ${imageNotes.length} image${imageNotes.length === 1 ? "" : "s"}`);
+    return true;
+  }
+
+  function mirrorSelectedImages(axis) {
+    const imageNotes = getSelectedImageNotes();
+    if (!imageNotes.length) {
+      return false;
+    }
+
+    const snapshots = captureNoteSnapshots(imageNotes.map((note) => note.id));
+
+    for (const note of imageNotes) {
+      if (axis === "y") {
+        note.flipY = !note.flipY;
+      } else {
+        note.flipX = !note.flipX;
+      }
+
+      const element = paper.querySelector(`[data-id="${CSS.escape(note.id)}"]`);
+      if (element) {
+        updateImageElement(element, note);
+      }
+    }
+
+    pushUndoAction({ type: "update", items: snapshots });
+    saveNotesNow();
+    const direction = axis === "y" ? "vertically" : "horizontally";
+    showPasteStatus(`Mirrored ${imageNotes.length} image${imageNotes.length === 1 ? "" : "s"} ${direction}`);
     return true;
   }
 
@@ -2395,6 +2463,21 @@
       event.preventDefault();
       removeActiveEmptyTextNote(activeTextNote);
       rotateSelectedImages(event.shiftKey ? -1 : 1);
+      return;
+    }
+
+    if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      event.key.toLocaleLowerCase() === "m" &&
+      selectedNoteIds.size &&
+      shouldUseBoardShortcut(activeTextNote) &&
+      getSelectedImageNotes().length
+    ) {
+      event.preventDefault();
+      removeActiveEmptyTextNote(activeTextNote);
+      mirrorSelectedImages(event.shiftKey ? "y" : "x");
       return;
     }
 

@@ -250,6 +250,24 @@ body {
   cursor: grab;
 }
 
+.image-mirror-control {
+  top: -28px;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  color: #3478f6;
+  font: 700 10px/1 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: pointer;
+}
+
+.image-mirror-horizontal-control {
+  left: -7px;
+}
+
+.image-mirror-vertical-control {
+  left: 14px;
+}
+
 .image-resize-control {
   right: -7px;
   bottom: -7px;
