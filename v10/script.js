@@ -17,6 +17,7 @@
   const legacyV811BoardStorageKey = "infinite-paper:v8.1.1:board";
   const legacyBoardStorageKey = "infinite-paper:v8.1:board";
   const redlineSettingsKey = `${appStoragePrefix}:redlines-enabled`;
+  const tabOverlayPositionKey = `${appStoragePrefix}:tab-overlay-position`;
   const syncChannelName = `${appStoragePrefix}:sync`;
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
@@ -61,6 +62,8 @@
   let boardOverlay = null;
   let renamingBoardId = "";
   let boardClickTimer = 0;
+  let activeTabOverlayDrag = null;
+  let suppressNextTabOverlayClick = false;
   let redlinesEnabled = loadRedlinesEnabled();
   let tabTitle = defaultDocumentTitle;
   let view = {
@@ -385,6 +388,137 @@
     refreshSpellHighlightsSoon();
   }
 
+  function loadTabOverlayPosition() {
+    try {
+      const position = JSON.parse(localStorage.getItem(tabOverlayPositionKey) || "null");
+      if (
+        Number.isFinite(Number(position?.x)) &&
+        Number.isFinite(Number(position?.y))
+      ) {
+        return {
+          x: Number(position.x),
+          y: Number(position.y),
+        };
+      }
+    } catch {
+      // Keep the default top-left position if storage is unavailable or malformed.
+    }
+    return null;
+  }
+
+  function saveTabOverlayPosition(x, y) {
+    try {
+      localStorage.setItem(
+        tabOverlayPositionKey,
+        JSON.stringify({
+          x: Math.round(x),
+          y: Math.round(y),
+        })
+      );
+    } catch {
+      // Position persistence is optional.
+    }
+  }
+
+  function getTabOverlayPosition() {
+    if (!tabOverlay) {
+      return { x: 12, y: 12 };
+    }
+
+    const rect = tabOverlay.getBoundingClientRect();
+    return {
+      x: rect.left,
+      y: rect.top,
+    };
+  }
+
+  function setTabOverlayPosition(x, y, options = {}) {
+    if (!tabOverlay) {
+      return;
+    }
+
+    const width = tabOverlay.offsetWidth || 128;
+    const height = tabOverlay.offsetHeight || 44;
+    const margin = 6;
+    const nextX = clamp(x, margin, Math.max(margin, window.innerWidth - width - margin));
+    const nextY = clamp(y, margin, Math.max(margin, window.innerHeight - height - margin));
+    tabOverlay.style.left = `${nextX}px`;
+    tabOverlay.style.top = `${nextY}px`;
+
+    if (options.persist) {
+      saveTabOverlayPosition(nextX, nextY);
+    }
+  }
+
+  function restoreTabOverlayPosition() {
+    const position = loadTabOverlayPosition();
+    if (position) {
+      tabOverlay.style.left = `${position.x}px`;
+      tabOverlay.style.top = `${position.y}px`;
+    }
+  }
+
+  function keepTabOverlayOnscreen() {
+    if (!tabOverlay || tabOverlay.hidden) {
+      return;
+    }
+
+    const position = getTabOverlayPosition();
+    setTabOverlayPosition(position.x, position.y, { persist: true });
+  }
+
+  function startTabOverlayDrag(event) {
+    if (event.button !== 0 || !tabOverlay) {
+      return;
+    }
+
+    const position = getTabOverlayPosition();
+    activeTabOverlayDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      overlayX: position.x,
+      overlayY: position.y,
+      moved: false,
+    };
+    tabOverlay.setPointerCapture(event.pointerId);
+  }
+
+  function moveTabOverlayDrag(event) {
+    if (!activeTabOverlayDrag || event.pointerId !== activeTabOverlayDrag.pointerId) {
+      return;
+    }
+
+    const dx = event.clientX - activeTabOverlayDrag.startX;
+    const dy = event.clientY - activeTabOverlayDrag.startY;
+    if (!activeTabOverlayDrag.moved && Math.hypot(dx, dy) <= panThreshold) {
+      return;
+    }
+
+    activeTabOverlayDrag.moved = true;
+    tabOverlay.classList.add("is-dragging");
+    setTabOverlayPosition(activeTabOverlayDrag.overlayX + dx, activeTabOverlayDrag.overlayY + dy);
+  }
+
+  function endTabOverlayDrag(event) {
+    if (!activeTabOverlayDrag || event.pointerId !== activeTabOverlayDrag.pointerId) {
+      return;
+    }
+
+    const didMove = activeTabOverlayDrag.moved;
+    activeTabOverlayDrag = null;
+    if (tabOverlay.hasPointerCapture(event.pointerId)) {
+      tabOverlay.releasePointerCapture(event.pointerId);
+    }
+    tabOverlay.classList.remove("is-dragging");
+
+    if (didMove && event.type === "pointerup") {
+      const position = getTabOverlayPosition();
+      saveTabOverlayPosition(position.x, position.y);
+      suppressNextTabOverlayClick = true;
+    }
+  }
+
   function getTabOverlay() {
     if (tabOverlay) {
       return tabOverlay;
@@ -395,6 +529,27 @@
     tabOverlay.hidden = true;
     tabOverlay.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
+      startTabOverlayDrag(event);
+    });
+    tabOverlay.addEventListener("pointermove", moveTabOverlayDrag);
+    tabOverlay.addEventListener("pointerup", endTabOverlayDrag);
+    tabOverlay.addEventListener("pointercancel", endTabOverlayDrag);
+    tabOverlay.addEventListener(
+      "click",
+      (event) => {
+        if (!suppressNextTabOverlayClick) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        suppressNextTabOverlayClick = false;
+      },
+      true
+    );
+    tabOverlay.addEventListener("lostpointercapture", () => {
+      activeTabOverlayDrag = null;
+      tabOverlay.classList.remove("is-dragging");
     });
 
     const toggleRedlines = document.createElement("button");
@@ -408,6 +563,7 @@
 
     document.body.appendChild(tabOverlay);
     syncTabOverlayState();
+    restoreTabOverlayPosition();
     return tabOverlay;
   }
 
@@ -416,6 +572,7 @@
     const overlay = getTabOverlay();
     overlay.hidden = false;
     syncTabOverlayState();
+    keepTabOverlayOnscreen();
   }
 
   function closeTabOverlay() {
@@ -3496,6 +3653,8 @@
       }
     }
   });
+
+  window.addEventListener("resize", keepTabOverlayOnscreen);
 
   window.addEventListener("beforeunload", () => {
     window.clearTimeout(noteSaveTimer);

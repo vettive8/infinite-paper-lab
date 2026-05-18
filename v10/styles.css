@@ -192,7 +192,13 @@ body {
   border-radius: 7px;
   background: #1b1b1b;
   box-shadow: 0 12px 28px rgb(0 0 0 / 24%);
+  cursor: grab;
+  touch-action: none;
   user-select: none;
+}
+
+.tab-overlay.is-dragging {
+  cursor: grabbing;
 }
 
 .tab-overlay[hidden] {
