@@ -4,6 +4,7 @@ This is a research and development workspace for testing simple infinite-paper n
 
 Each version folder is a separate experiment:
 
+- `web/` is the production-focused hosted app with Supabase auth, cloud boards, private images, and invite collaboration.
 - `v1/` is the frozen first version: a full-screen white paper where clicking creates a writable note.
 - `v2/` tests no automatic wrapping: lines only break when Enter is pressed.
 - `v3/` keeps `v2` behavior and tests tighter Notepad-like line spacing.
