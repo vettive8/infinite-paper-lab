@@ -576,14 +576,14 @@ body {
 }
 
 .image-rotate-control {
-  top: -21px;
-  right: -21px;
-  width: 19px;
-  height: 19px;
+  top: -34px;
+  right: -34px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   color: #3478f6;
-  font-size: 12px;
+  font-size: 19px;
   line-height: 1;
   cursor: grab;
 }

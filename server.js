@@ -365,11 +365,40 @@ async function handleApi(req, res, pathname) {
     return saveBoard(req, res);
   }
 
-  // POST /api/import  -> create a new board from raw Infinite Paper markdown
+  // POST /api/import?name=<filename>  -> create a new board from a dropped
+  // markdown file. An Infinite Paper board file is parsed as-is; any other
+  // markdown file becomes a board holding the whole document as one note.
   if (pathname === "/api/import" && req.method === "POST") {
     try {
-      const board = parseBoard((await readBody(req)).toString("utf8"));
+      const raw = (await readBody(req)).toString("utf8");
+      const name = new url.URL(req.url, "http://localhost").searchParams.get(
+        "name"
+      );
       const now = Date.now();
+      let board;
+      if (/<!--\s*ip-note\b/.test(raw)) {
+        board = parseBoard(raw);
+      } else {
+        const title =
+          String(name || "")
+            .replace(/\.md$/i, "")
+            .replace(/[_-]+/g, " ")
+            .trim() || "Imported note";
+        board = {
+          id: "",
+          title,
+          pinned: false,
+          order: 0,
+          createdAt: now,
+          updatedAt: now,
+          lastOpenedAt: now,
+          revision: 1,
+          view: { x: 0, y: 0, scale: 1 },
+          notes: [
+            { id: crypto.randomUUID(), type: "text", x: 0, y: 0, text: raw },
+          ],
+        };
+      }
       board.id = crypto.randomUUID(); // a fresh id so it never collides
       board.createdAt = now;
       board.updatedAt = now;

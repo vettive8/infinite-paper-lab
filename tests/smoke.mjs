@@ -285,4 +285,42 @@ export async function run({ page, step, expect, config }) {
       "the imported board to open with its note on the canvas"
     );
   });
+
+  await step("dropping a plain .md file also imports it as a board", async () => {
+    const before = boardFiles().length;
+    await page.evaluate(() => {
+      const file = new File(
+        ["# Partner SOW\n\nplain markdown body text"],
+        "Partner_SOW.md",
+        { type: "text/markdown" }
+      );
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const target = document.getElementById("viewport") || document.body;
+      for (const type of ["dragenter", "dragover", "drop"]) {
+        target.dispatchEvent(
+          new DragEvent(type, {
+            dataTransfer: dt,
+            bubbles: true,
+            cancelable: true,
+            clientX: 700,
+            clientY: 400,
+          })
+        );
+      }
+    });
+    await waitFor(
+      () => boardFiles().length > before,
+      6000,
+      "a new board file from the plain-markdown import"
+    );
+    await waitFor(
+      async () =>
+        (await page.locator(".note").allInnerTexts()).some((t) =>
+          t.includes("plain markdown body text")
+        ),
+      6000,
+      "the plain markdown to open as a board with its content as a note"
+    );
+  });
 }

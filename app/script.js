@@ -1742,7 +1742,7 @@
     rotateHandle.type = "button";
     rotateHandle.className = "image-control image-rotate-control";
     rotateHandle.title = "Drag to rotate";
-    rotateHandle.textContent = "↻"; // curved rotation arrow
+    rotateHandle.textContent = "⟳"; // curved rotation arrow
     rotateHandle.setAttribute("aria-label", "Rotate image");
     rotateHandle.addEventListener("pointerdown", (event) => {
       startImageTransform(event, noteId, "rotate");
@@ -3811,18 +3811,17 @@
 
   // --- import a dropped markdown file -----------------------------------
 
-  function looksLikeBoard(text) {
-    return /<!--\s*ip-note\b/.test(text);
-  }
-
-  async function importBoardFile(text) {
+  async function importBoardFile(text, name) {
     let board;
     try {
-      const data = await apiJson("/api/import", {
-        method: "POST",
-        headers: { "Content-Type": "text/markdown" },
-        body: text,
-      });
+      const data = await apiJson(
+        `/api/import?name=${encodeURIComponent(name || "")}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "text/markdown" },
+          body: text,
+        }
+      );
       board = data?.board;
     } catch {
       showPasteStatus("Board import failed", true);
@@ -3836,22 +3835,6 @@
     saveBoardsIndex();
     await switchBoard(board.id);
     showPasteStatus(`Imported board: ${board.title}`);
-  }
-
-  function importPlainMarkdown(text, point) {
-    const note = {
-      id: makeId(),
-      type: "text",
-      x: Math.round(point.x),
-      y: Math.round(point.y),
-      text,
-    };
-    notes.push(note);
-    paper.appendChild(createNoteElement(note));
-    setSelectedNotes([note.id]);
-    pushUndoAction({ type: "add", ids: [note.id] });
-    saveNotesNow();
-    showPasteStatus("Imported markdown as a note");
   }
 
   function handleFileDragOver(event) {
@@ -3874,7 +3857,7 @@
     if (!markdownFiles.length) {
       return;
     }
-    const point = viewportToWorld(event.clientX, event.clientY);
+    // A dropped markdown file always becomes its own new board.
     for (const file of markdownFiles) {
       let text = "";
       try {
@@ -3882,13 +3865,7 @@
       } catch {
         continue;
       }
-      // An Infinite Paper board file becomes a new board; any other
-      // markdown file drops in as a single text note.
-      if (looksLikeBoard(text)) {
-        await importBoardFile(text);
-      } else {
-        importPlainMarkdown(text, point);
-      }
+      await importBoardFile(text, file.name);
     }
   }
 
