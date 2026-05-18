@@ -260,7 +260,7 @@
     if (board) {
       board.updatedAt = Date.now();
       saveBoardsIndex();
-      renderBoardOverlay();
+      renderBoardOverlayIfVisible();
     }
     syncChannel?.postMessage({ type: "board-updated", state });
     dirtyNoteIds.clear();
@@ -268,6 +268,12 @@
 
   function saveViewNow() {
     sessionStorage.setItem(getViewStorageKey(), JSON.stringify(view));
+  }
+
+  function renderBoardOverlayIfVisible() {
+    if (boardOverlay && !boardOverlay.hidden) {
+      renderBoardOverlay();
+    }
   }
 
   function normalizeTabTitle(value) {
@@ -288,7 +294,7 @@
         board.title = tabTitle;
         board.updatedAt = Date.now();
         saveBoardsIndex();
-        renderBoardOverlay();
+        renderBoardOverlayIfVisible();
       }
     }
 

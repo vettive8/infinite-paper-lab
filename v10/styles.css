@@ -57,6 +57,17 @@ body {
   height: 1px;
   overflow: visible;
   transform-origin: 0 0;
+  will-change: transform;
+}
+
+#paper::before {
+  content: "";
+  position: absolute;
+  left: -100000px;
+  top: -100000px;
+  width: 200000px;
+  height: 200000px;
+  pointer-events: none;
 }
 
 .selection-box {
