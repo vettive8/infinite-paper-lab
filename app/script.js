@@ -474,6 +474,19 @@
     return JSON.stringify(cleanNotes(normalizeNotes(list)));
   }
 
+  function boardsSignature(list) {
+    return JSON.stringify(
+      [...list]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((board) => ({
+          id: board.id,
+          pinned: board.pinned,
+          order: board.order,
+          title: board.title,
+        }))
+    );
+  }
+
   async function refreshFromServer() {
     let indexData = null;
     let boardData = null;
@@ -486,16 +499,24 @@
       return; // server hiccup; the next event will retry
     }
 
-    if (Array.isArray(indexData?.boards)) {
-      boards = indexData.boards.map(normalizeBoardRecord).filter(Boolean);
-      renderBoardOverlayIfVisible();
-    }
-
-    // If the user started editing while we were fetching, their work is
-    // the fresher copy — leave the canvas untouched.
+    // If the user changed anything while we were fetching, their in-memory
+    // copy is the fresher one — don't let a stale echo overwrite it.
     if (hasUnsyncedChanges()) {
       return;
     }
+
+    if (Array.isArray(indexData?.boards)) {
+      const incomingBoards = indexData.boards
+        .map(normalizeBoardRecord)
+        .filter(Boolean);
+      // Only re-render when the board list actually differs, so our own
+      // saves echoing back don't cause a redundant flicker.
+      if (boardsSignature(incomingBoards) !== boardsSignature(boards)) {
+        boards = incomingBoards;
+        renderBoardOverlayIfVisible();
+      }
+    }
+
     const incoming = boardData?.board;
     if (!incoming) {
       return;
@@ -1280,7 +1301,7 @@
     loadTabTitle();
     applyView();
     renderNotes();
-    renderBoardOverlay();
+    startBoardRename(board.id); // a fresh board opens straight into rename
   }
 
   function toggleBoardPin(boardId) {
