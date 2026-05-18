@@ -928,15 +928,32 @@
     target.addEventListener("pointercancel", endBoardPress);
   }
 
-  // Promote the press into a drag: lift the row.
+  // Promote the press into a drag: lift the row out of flow and snapshot
+  // the geometry of its group so the other rows can reflow live.
   function beginBoardDrag() {
     if (!boardDrag || boardDrag.dragging) {
       return;
     }
+    const { list, row, pinned } = boardDrag;
     boardDrag.dragging = true;
     window.clearTimeout(boardDrag.holdTimer);
     clearTimeout(boardClickTimer); // cancel any pending board switch
-    boardDrag.row.classList.add("is-dragging");
+
+    const groupRows = Array.from(list.querySelectorAll(".board-row")).filter(
+      (other) => other.dataset.pinned === String(pinned)
+    );
+    boardDrag.groupRows = groupRows;
+    boardDrag.homeRects = groupRows.map((other) =>
+      other.getBoundingClientRect()
+    );
+    boardDrag.fromIndex = groupRows.indexOf(row);
+    boardDrag.targetIndex = boardDrag.fromIndex;
+    boardDrag.pitch =
+      boardDrag.homeRects.length > 1
+        ? boardDrag.homeRects[1].top - boardDrag.homeRects[0].top
+        : row.getBoundingClientRect().height + 4;
+
+    row.classList.add("is-dragging");
   }
 
   function onBoardPressMove(event) {
@@ -954,26 +971,43 @@
       beginBoardDrag();
     }
 
-    const { list, row, pinned } = boardDrag;
-    const peers = Array.from(list.querySelectorAll(".board-row")).filter(
-      (other) => other !== row && other.dataset.pinned === String(pinned)
-    );
-    if (!peers.length) {
-      return;
+    const { row, groupRows, homeRects, fromIndex, pitch } = boardDrag;
+    const delta = event.clientY - boardDrag.startY;
+
+    // The lifted row tracks the cursor exactly.
+    row.style.transform = `translateY(${delta}px) scale(1.03)`;
+
+    if (!groupRows || groupRows.length < 2) {
+      return; // nothing else in this group to reorder against
     }
-    let reference = null;
-    for (const other of peers) {
-      const rect = other.getBoundingClientRect();
-      if (event.clientY < rect.top + rect.height / 2) {
-        reference = other;
-        break;
+
+    // Which slot is the lifted row's centre over now?
+    const home = homeRects[fromIndex];
+    const draggedCenter = home.top + home.height / 2 + delta;
+    let targetIndex = 0;
+    for (let i = 0; i < groupRows.length; i += 1) {
+      if (i === fromIndex) {
+        continue;
+      }
+      const rect = homeRects[i];
+      if (rect.top + rect.height / 2 < draggedCenter) {
+        targetIndex += 1;
       }
     }
-    if (!reference) {
-      reference = peers[peers.length - 1].nextSibling;
-    }
-    if (reference !== row) {
-      list.insertBefore(row, reference);
+    boardDrag.targetIndex = targetIndex;
+
+    // Slide every other row to open a gap at the target slot.
+    for (let i = 0; i < groupRows.length; i += 1) {
+      if (i === fromIndex) {
+        continue;
+      }
+      let shift = 0;
+      if (i < fromIndex && i >= targetIndex) {
+        shift = pitch;
+      } else if (i > fromIndex && i <= targetIndex) {
+        shift = -pitch;
+      }
+      groupRows[i].style.transform = shift ? `translateY(${shift}px)` : "";
     }
   }
 
@@ -981,27 +1015,55 @@
     if (!boardDrag) {
       return;
     }
-    const { target, pointerId, row, list, dragging, boardId } = boardDrag;
-    window.clearTimeout(boardDrag.holdTimer);
-    target.releasePointerCapture?.(pointerId);
-    target.removeEventListener("pointermove", onBoardPressMove);
-    target.removeEventListener("pointerup", endBoardPress);
-    target.removeEventListener("pointercancel", endBoardPress);
+    const drag = boardDrag;
     boardDrag = null;
+    window.clearTimeout(drag.holdTimer);
+    drag.target.releasePointerCapture?.(drag.pointerId);
+    drag.target.removeEventListener("pointermove", onBoardPressMove);
+    drag.target.removeEventListener("pointerup", endBoardPress);
+    drag.target.removeEventListener("pointercancel", endBoardPress);
 
-    if (dragging) {
-      row.classList.remove("is-dragging");
-      Array.from(list.querySelectorAll(".board-row")).forEach((item, index) => {
-        const board = boards.find((entry) => entry.id === item.dataset.boardId);
-        if (board) {
-          board.order = index;
-        }
-      });
-      saveBoardsIndex();
-      renderBoardOverlay();
-    } else if (event.type === "pointerup") {
-      scheduleBoardSwitch(boardId); // a plain press opens the board
+    if (!drag.dragging) {
+      if (event.type === "pointerup") {
+        scheduleBoardSwitch(drag.boardId); // a plain press opens the board
+      }
+      return;
     }
+
+    commitBoardDrag(drag);
+  }
+
+  function commitBoardDrag(drag) {
+    const { row, groupRows, fromIndex, targetIndex, pitch } = drag;
+
+    // Reorder this group's ids, then renumber every board's order.
+    const groupIds = groupRows.map((other) => other.dataset.boardId);
+    if (groupRows.length >= 2 && targetIndex !== fromIndex) {
+      const [movedId] = groupIds.splice(fromIndex, 1);
+      groupIds.splice(targetIndex, 0, movedId);
+    }
+    const pinnedIds = drag.pinned
+      ? groupIds
+      : sortedBoards()
+          .filter((board) => board.pinned)
+          .map((board) => board.id);
+    const unpinnedIds = drag.pinned
+      ? sortedBoards()
+          .filter((board) => !board.pinned)
+          .map((board) => board.id)
+      : groupIds;
+    [...pinnedIds, ...unpinnedIds].forEach((id, index) => {
+      const board = boards.find((entry) => entry.id === id);
+      if (board) {
+        board.order = index;
+      }
+    });
+    saveBoardsIndex();
+
+    // Ease the lifted row into its slot, then redraw the list cleanly.
+    row.style.transition = "transform 0.14s ease";
+    row.style.transform = `translateY(${(targetIndex - fromIndex) * pitch}px)`;
+    window.setTimeout(renderBoardOverlay, 150);
   }
 
   function getBoardOverlay() {

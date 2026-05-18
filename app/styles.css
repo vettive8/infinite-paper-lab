@@ -349,7 +349,7 @@ body {
   align-items: center;
   gap: 6px;
   border-radius: 6px;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition: transform 0.16s ease;
 }
 
 .board-row.is-current {
@@ -359,8 +359,8 @@ body {
 .board-row.is-dragging {
   position: relative;
   z-index: 5;
-  transform: scale(1.03);
-  box-shadow: 0 8px 20px rgb(0 0 0 / 45%);
+  transition: none;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 50%);
   background: #20262b;
   cursor: grabbing;
 }
