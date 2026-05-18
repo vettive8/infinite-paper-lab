@@ -138,6 +138,7 @@
 
   const apiBase = "";
   let storageReady = false;
+  let pendingNoteSave = false;
 
   async function apiJson(pathName, options) {
     const response = await fetch(apiBase + pathName, options);
@@ -411,6 +412,7 @@
   }
 
   function saveNotesSoon() {
+    pendingNoteSave = true;
     window.clearTimeout(noteSaveTimer);
     noteSaveTimer = window.setTimeout(saveNotesNow, 80);
   }
@@ -424,6 +426,7 @@
     if (!storageReady) {
       return;
     }
+    pendingNoteSave = false;
     syncNotesFromDom();
     const revision = nextRevision();
     const cleaned = cleanNotes(notes);
@@ -454,6 +457,70 @@
 
   function saveViewNow() {
     sessionStorage.setItem(getViewStorageKey(), JSON.stringify(view));
+  }
+
+  // --- live reload: pick up external (VS Code / AI) board edits --------
+
+  function hasUnsyncedChanges() {
+    return (
+      pendingNoteSave || boardWriteQueue.size > 0 || boardWriteActive.size > 0
+    );
+  }
+
+  function notesSignature(list) {
+    return JSON.stringify(cleanNotes(normalizeNotes(list)));
+  }
+
+  async function refreshFromServer() {
+    let indexData = null;
+    let boardData = null;
+    try {
+      indexData = await apiJson("/api/boards");
+      boardData = await apiJson(
+        `/api/boards/${encodeURIComponent(currentBoardId)}`
+      );
+    } catch {
+      return; // server hiccup; the next event will retry
+    }
+
+    if (Array.isArray(indexData?.boards)) {
+      boards = indexData.boards.map(normalizeBoardRecord).filter(Boolean);
+      renderBoardOverlayIfVisible();
+    }
+
+    // If the user started editing while we were fetching, their work is
+    // the fresher copy — leave the canvas untouched.
+    if (hasUnsyncedChanges()) {
+      return;
+    }
+    const incoming = boardData?.board;
+    if (!incoming) {
+      return;
+    }
+    const incomingNotes = normalizeNotes(incoming.notes);
+    if (notesSignature(incomingNotes) === notesSignature(notes)) {
+      return; // no real change (typically our own save echoing back)
+    }
+    notes = incomingNotes;
+    boardRevision = Number(incoming.revision) || boardRevision;
+    pruneSelectedNotes();
+    renderSyncedNotes();
+    if (!findBar.hidden) {
+      refreshFindMatches();
+    }
+  }
+
+  function setupLiveReload() {
+    if (!window.EventSource) {
+      return;
+    }
+    const events = new EventSource(`${apiBase}/api/events`);
+    events.addEventListener("boards-changed", () => {
+      if (!storageReady || hasUnsyncedChanges()) {
+        return; // mid-edit: our in-memory copy is the fresher one
+      }
+      refreshFromServer();
+    });
   }
 
   function renderBoardOverlayIfVisible() {
@@ -3905,7 +3972,12 @@
     window.clearTimeout(viewSaveTimer);
     window.clearTimeout(spellHighlightTimer);
     CSS.highlights?.delete("app-spell-error");
-    saveNotesNow();
+    if (pendingNoteSave) {
+      // Only flush a genuinely pending edit. A page that is merely
+      // displaying notes must not write its (possibly stale) copy back
+      // over a newer version of the file.
+      saveNotesNow();
+    }
     saveViewNow();
     syncChannel?.close();
   });
@@ -3918,5 +3990,6 @@
     loadTabTitle();
     applyView();
     renderNotes();
+    setupLiveReload();
   })();
 })();

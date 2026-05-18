@@ -295,10 +295,13 @@ function broadcastBoardsChanged() {
 
 function watchBoards() {
   try {
-    fs.watch(BOARDS_DIR, () => {
+    fs.watch(BOARDS_DIR, (event, filename) => {
       clearTimeout(watchTimer);
       watchTimer = setTimeout(async () => {
         await indexBoards();
+        console.log(
+          `boards changed (${filename}) -> ${sseClients.size} live client(s)`
+        );
         broadcastBoardsChanged();
       }, 150);
     });
