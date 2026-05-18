@@ -483,8 +483,11 @@
       overlayX: position.x,
       overlayY: position.y,
       moved: false,
+      captured: false,
     };
-    tabOverlay.setPointerCapture(event.pointerId);
+    window.addEventListener("pointermove", moveTabOverlayDrag, true);
+    window.addEventListener("pointerup", endTabOverlayDrag, true);
+    window.addEventListener("pointercancel", endTabOverlayDrag, true);
   }
 
   function moveTabOverlayDrag(event) {
@@ -499,8 +502,22 @@
     }
 
     activeTabOverlayDrag.moved = true;
+    if (!activeTabOverlayDrag.captured) {
+      try {
+        tabOverlay.setPointerCapture(event.pointerId);
+      } catch {
+        // Window-level drag listeners still keep the overlay moving.
+      }
+      activeTabOverlayDrag.captured = true;
+    }
     tabOverlay.classList.add("is-dragging");
     setTabOverlayPosition(activeTabOverlayDrag.overlayX + dx, activeTabOverlayDrag.overlayY + dy);
+  }
+
+  function removeTabOverlayDragListeners() {
+    window.removeEventListener("pointermove", moveTabOverlayDrag, true);
+    window.removeEventListener("pointerup", endTabOverlayDrag, true);
+    window.removeEventListener("pointercancel", endTabOverlayDrag, true);
   }
 
   function endTabOverlayDrag(event) {
@@ -510,6 +527,7 @@
 
     const didMove = activeTabOverlayDrag.moved;
     activeTabOverlayDrag = null;
+    removeTabOverlayDragListeners();
     if (tabOverlay.hasPointerCapture(event.pointerId)) {
       tabOverlay.releasePointerCapture(event.pointerId);
     }
@@ -519,6 +537,9 @@
       const position = getTabOverlayPosition();
       saveTabOverlayPosition(position.x, position.y);
       suppressNextTabOverlayClick = true;
+      window.setTimeout(() => {
+        suppressNextTabOverlayClick = false;
+      }, 0);
     }
   }
 
@@ -534,9 +555,6 @@
       event.stopPropagation();
       startTabOverlayDrag(event);
     });
-    tabOverlay.addEventListener("pointermove", moveTabOverlayDrag);
-    tabOverlay.addEventListener("pointerup", endTabOverlayDrag);
-    tabOverlay.addEventListener("pointercancel", endTabOverlayDrag);
     tabOverlay.addEventListener(
       "click",
       (event) => {
@@ -552,6 +570,7 @@
     );
     tabOverlay.addEventListener("lostpointercapture", () => {
       activeTabOverlayDrag = null;
+      removeTabOverlayDragListeners();
       tabOverlay.classList.remove("is-dragging");
     });
 
