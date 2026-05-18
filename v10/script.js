@@ -119,6 +119,14 @@
     return boards.find((board) => board.id === currentBoardId) || null;
   }
 
+  function isTextEntryElement(element) {
+    return Boolean(
+      element?.matches?.("input, textarea, select") ||
+        element?.isContentEditable ||
+        element?.closest?.('[contenteditable="true"]')
+    );
+  }
+
   function saveBoardsIndex() {
     localStorage.setItem(
       boardsStorageKey,
@@ -483,6 +491,7 @@
     for (const board of sortedBoards()) {
       const row = document.createElement("div");
       row.className = "board-row";
+      row.dataset.boardId = board.id;
       row.classList.toggle("is-current", board.id === currentBoardId);
 
       if (renamingBoardId === board.id) {
@@ -555,6 +564,15 @@
       input?.focus({ preventScroll: true });
       input?.select();
     });
+  }
+
+  function getFocusedBoardOverlayId() {
+    if (!boardOverlay || boardOverlay.hidden) {
+      return "";
+    }
+
+    const row = document.activeElement?.closest?.(".board-row");
+    return row?.dataset.boardId || currentBoardId;
   }
 
   function scheduleBoardSwitch(boardId) {
@@ -3300,6 +3318,10 @@
 
     if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "F2") {
       event.preventDefault();
+      if (boardOverlay && !boardOverlay.hidden) {
+        startBoardRename(getFocusedBoardOverlayId());
+        return;
+      }
       openTitleRename();
       return;
     }
@@ -3311,6 +3333,10 @@
     }
 
     if (titleBar.contains(document.activeElement)) {
+      return;
+    }
+
+    if (boardOverlay?.contains(document.activeElement) && isTextEntryElement(document.activeElement)) {
       return;
     }
 
