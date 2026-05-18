@@ -3237,11 +3237,10 @@
       return;
     }
 
-    const bridgeImages = await readBridgeClipboardImages();
-    if (bridgeImages.length) {
-      images = bridgeImages;
-    }
-
+    // The native paste event (or the fallback above) already gave us the
+    // image. The PowerShell clipboard bridge stays as a fallback inside
+    // readFallbackClipboardImages — re-fetching it here just to override a
+    // working image added a round-trip to every paste.
     if (!images.length) {
       return;
     }
