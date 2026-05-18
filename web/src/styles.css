@@ -79,7 +79,7 @@ body {
   cursor: pointer;
 }
 
-.auth-panel button:first-of-type {
+#google-login {
   width: 100%;
   margin-bottom: 10px;
 }
