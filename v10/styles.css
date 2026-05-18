@@ -170,8 +170,8 @@ body {
 
 .tab-overlay {
   position: fixed;
-  top: 14px;
-  left: 50%;
+  top: 12px;
+  left: 12px;
   z-index: 45;
   display: flex;
   align-items: center;
@@ -181,7 +181,6 @@ body {
   border-radius: 7px;
   background: #1b1b1b;
   box-shadow: 0 12px 28px rgb(0 0 0 / 24%);
-  transform: translateX(-50%);
   user-select: none;
 }
 
@@ -208,6 +207,133 @@ body {
 
 .tab-overlay button[aria-pressed="true"] {
   color: #9ec2ff;
+}
+
+.board-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  pointer-events: none;
+  user-select: none;
+}
+
+.board-overlay[hidden] {
+  display: none;
+}
+
+.board-overlay-top,
+.board-overlay-side {
+  pointer-events: auto;
+  border-color: #343434;
+  background: #171a1b;
+  color: #f3f3f3;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 24%);
+  font: 13px/1.25 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.board-overlay-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid #343434;
+}
+
+.board-overlay-top strong {
+  font-weight: 600;
+}
+
+.board-overlay-top span {
+  color: #9c9c9c;
+  font-size: 12px;
+}
+
+.board-overlay-side {
+  position: fixed;
+  top: 42px;
+  left: 0;
+  bottom: 0;
+  width: 292px;
+  padding: 12px;
+  overflow: auto;
+  border-right: 1px solid #343434;
+}
+
+.board-new-button,
+.board-select,
+.board-pin {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.board-new-button {
+  width: 100%;
+  height: 34px;
+  margin-bottom: 10px;
+  border: 1px solid #3b526f;
+  color: #9ec2ff;
+  text-align: left;
+}
+
+.board-new-button,
+.board-select {
+  padding: 0 10px;
+}
+
+.board-list {
+  display: grid;
+  gap: 4px;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+}
+
+.board-row.is-current {
+  background: rgb(106 167 255 / 15%);
+}
+
+.board-select {
+  min-width: 0;
+  height: 34px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-pin {
+  height: 26px;
+  padding: 0 8px;
+  color: #aeb4bb;
+  font-size: 12px;
+}
+
+.board-pin[aria-pressed="true"] {
+  color: #9ec2ff;
+}
+
+.board-new-button:hover,
+.board-new-button:focus-visible,
+.board-select:hover,
+.board-select:focus-visible,
+.board-pin:hover,
+.board-pin:focus-visible {
+  background: #272b2d;
+  outline: 0;
 }
 
 .find-bar,

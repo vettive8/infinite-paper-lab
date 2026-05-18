@@ -12,12 +12,12 @@
   const titleClose = document.getElementById("title-close");
   const selectionBox = document.getElementById("selection-box");
   const defaultDocumentTitle = document.title;
-  const boardStorageKey = "infinite-paper:v8.1.1:board";
+  const appStoragePrefix = "infinite-paper:v10";
+  const boardsStorageKey = `${appStoragePrefix}:boards`;
+  const legacyV811BoardStorageKey = "infinite-paper:v8.1.1:board";
   const legacyBoardStorageKey = "infinite-paper:v8.1:board";
-  const viewStorageKey = "infinite-paper:v8.1.1:view";
-  const tabTitleStorageKey = "infinite-paper:v8.1.1:tab-title";
-  const redlineSettingsKey = "infinite-paper:v8.1.1:redlines-enabled";
-  const syncChannelName = "infinite-paper:v8.1.1:sync";
+  const redlineSettingsKey = `${appStoragePrefix}:redlines-enabled`;
+  const syncChannelName = `${appStoragePrefix}:sync`;
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
   const clipboardBridgeImageUrl = "http://127.0.0.1:8124/clipboard-image";
@@ -28,9 +28,11 @@
   const clientId = makeId();
   const syncChannel = "BroadcastChannel" in window ? new BroadcastChannel(syncChannelName) : null;
   const spellService = window.createInfinitePaperSpellService(
-    "infinite-paper:v8.1.1:personal-dictionary"
+    `${appStoragePrefix}:personal-dictionary`
   );
 
+  let boards = [];
+  let currentBoardId = "";
   let notes = [];
   let imageDbPromise = null;
   let activeDrag = null;
@@ -56,6 +58,7 @@
   let spellingBubble = null;
   let activeSpelling = null;
   let tabOverlay = null;
+  let boardOverlay = null;
   let redlinesEnabled = loadRedlinesEnabled();
   let tabTitle = defaultDocumentTitle;
   let view = {
@@ -70,42 +73,164 @@
     hasJumped: false,
   };
 
-  function loadState() {
-    try {
-      const savedBoard = JSON.parse(localStorage.getItem(boardStorageKey) || "null");
-      const legacyBoard = JSON.parse(localStorage.getItem(legacyBoardStorageKey) || "null");
-      const savedNotes = normalizeNotes(savedBoard?.notes);
-      const legacyNotes = normalizeNotes(legacyBoard?.notes);
-      const shouldMigrate =
-        legacyNotes.length > 0 &&
-        (!savedBoard || (savedNotes.length === 0 && savedBoard.migratedFrom !== "v8.1"));
-      const sourceBoard = shouldMigrate ? legacyBoard : savedBoard || {};
+  function getBoardStorageKey(boardId = currentBoardId) {
+    return `${appStoragePrefix}:board:${boardId}`;
+  }
 
-      notes = shouldMigrate ? legacyNotes : savedNotes;
-      boardRevision = Number(sourceBoard.revision) || 0;
-      migratedFromLegacy = shouldMigrate || savedBoard?.migratedFrom === "v8.1";
+  function getViewStorageKey(boardId = currentBoardId) {
+    return `${appStoragePrefix}:view:${boardId}`;
+  }
 
-      if (shouldMigrate) {
-        saveNotesNow();
-      }
-    } catch {
-      notes = [];
-      boardRevision = 0;
-      migratedFromLegacy = false;
+  function getTabTitleStorageKey(boardId = currentBoardId) {
+    return `${appStoragePrefix}:tab-title:${boardId}`;
+  }
+
+  function createBoardRecord(title = "Untitled board") {
+    const now = Date.now();
+    return {
+      id: makeId(),
+      title,
+      pinned: false,
+      createdAt: now,
+      updatedAt: now,
+      lastOpenedAt: now,
+    };
+  }
+
+  function normalizeBoardRecord(board, fallbackIndex = 0) {
+    if (!board || typeof board.id !== "string") {
+      return null;
     }
 
+    const now = Date.now();
+    return {
+      id: board.id,
+      title: normalizeTabTitle(board.title || `Board ${fallbackIndex + 1}`) || `Board ${fallbackIndex + 1}`,
+      pinned: Boolean(board.pinned),
+      createdAt: Number(board.createdAt) || now,
+      updatedAt: Number(board.updatedAt) || now,
+      lastOpenedAt: Number(board.lastOpenedAt) || Number(board.updatedAt) || now,
+    };
+  }
+
+  function getCurrentBoard() {
+    return boards.find((board) => board.id === currentBoardId) || null;
+  }
+
+  function saveBoardsIndex() {
+    localStorage.setItem(
+      boardsStorageKey,
+      JSON.stringify({
+        version: 1,
+        currentBoardId,
+        boards,
+      })
+    );
+  }
+
+  function readSavedBoardState(boardId) {
     try {
-      const savedView = JSON.parse(sessionStorage.getItem(viewStorageKey) || "{}");
+      return JSON.parse(localStorage.getItem(getBoardStorageKey(boardId)) || "null");
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSavedBoardState(boardId, state) {
+    localStorage.setItem(getBoardStorageKey(boardId), JSON.stringify(state));
+  }
+
+  function seedV10BoardsIfNeeded() {
+    const board = createBoardRecord("Main board");
+    currentBoardId = board.id;
+    boards = [board];
+
+    let sourceBoard = null;
+    try {
+      sourceBoard =
+        JSON.parse(localStorage.getItem(legacyV811BoardStorageKey) || "null") ||
+        JSON.parse(localStorage.getItem(legacyBoardStorageKey) || "null");
+    } catch {
+      sourceBoard = null;
+    }
+
+    const importedNotes = normalizeNotes(sourceBoard?.notes);
+    if (importedNotes.length) {
+      board.title = "Imported v8.1.1";
+      writeSavedBoardState(board.id, {
+        version: 1,
+        revision: Date.now(),
+        origin: clientId,
+        migratedFrom: "v8.1.1",
+        notes: cleanNotes(importedNotes),
+      });
+    }
+
+    saveBoardsIndex();
+  }
+
+  function loadBoardsIndex() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(boardsStorageKey) || "null");
+      boards = Array.isArray(saved?.boards)
+        ? saved.boards.map(normalizeBoardRecord).filter(Boolean)
+        : [];
+      currentBoardId = typeof saved?.currentBoardId === "string" ? saved.currentBoardId : "";
+    } catch {
+      boards = [];
+      currentBoardId = "";
+    }
+
+    if (!boards.length) {
+      seedV10BoardsIfNeeded();
+      return;
+    }
+
+    if (!boards.some((board) => board.id === currentBoardId)) {
+      currentBoardId = boards[0].id;
+    }
+    saveBoardsIndex();
+  }
+
+  function loadCurrentBoardView() {
+    try {
+      const savedView = JSON.parse(sessionStorage.getItem(getViewStorageKey()) || "{}");
       if (savedView && Number.isFinite(savedView.x) && Number.isFinite(savedView.y)) {
         view = {
           x: savedView.x,
           y: savedView.y,
           scale: clamp(Number(savedView.scale) || 1, 0.45, 2.4),
         };
+        return;
       }
     } catch {
-      saveViewNow();
+      // Fall through to the default centered view.
     }
+
+    view = {
+      x: Math.round(window.innerWidth / 2),
+      y: Math.round(window.innerHeight / 2),
+      scale: 1,
+    };
+  }
+
+  function loadState() {
+    loadBoardsIndex();
+
+    try {
+      const savedBoard = readSavedBoardState(currentBoardId) || {};
+      const savedNotes = normalizeNotes(savedBoard?.notes);
+
+      notes = savedNotes;
+      boardRevision = Number(savedBoard.revision) || 0;
+      migratedFromLegacy = Boolean(savedBoard.migratedFrom);
+    } catch {
+      notes = [];
+      boardRevision = 0;
+      migratedFromLegacy = false;
+    }
+
+    loadCurrentBoardView();
   }
 
   function saveNotesSoon() {
@@ -122,18 +247,25 @@
     syncNotesFromDom();
     const state = {
       version: 1,
+      boardId: currentBoardId,
       revision: nextRevision(),
       origin: clientId,
       migratedFrom: migratedFromLegacy ? "v8.1" : undefined,
       notes: cleanNotes(notes),
     };
-    localStorage.setItem(boardStorageKey, JSON.stringify(state));
+    writeSavedBoardState(currentBoardId, state);
+    const board = getCurrentBoard();
+    if (board) {
+      board.updatedAt = Date.now();
+      saveBoardsIndex();
+      renderBoardOverlay();
+    }
     syncChannel?.postMessage({ type: "board-updated", state });
     dirtyNoteIds.clear();
   }
 
   function saveViewNow() {
-    sessionStorage.setItem(viewStorageKey, JSON.stringify(view));
+    sessionStorage.setItem(getViewStorageKey(), JSON.stringify(view));
   }
 
   function normalizeTabTitle(value) {
@@ -148,19 +280,33 @@
     tabTitle = cleanTitle || defaultDocumentTitle;
     document.title = tabTitle;
 
+    if (options.updateBoard !== false) {
+      const board = getCurrentBoard();
+      if (board && board.title !== tabTitle) {
+        board.title = tabTitle;
+        board.updatedAt = Date.now();
+        saveBoardsIndex();
+        renderBoardOverlay();
+      }
+    }
+
     if (options.persist === false) {
       return;
     }
 
     if (cleanTitle && cleanTitle !== defaultDocumentTitle) {
-      sessionStorage.setItem(tabTitleStorageKey, cleanTitle);
+      sessionStorage.setItem(getTabTitleStorageKey(), cleanTitle);
     } else {
-      sessionStorage.removeItem(tabTitleStorageKey);
+      sessionStorage.removeItem(getTabTitleStorageKey());
     }
   }
 
   function loadTabTitle() {
-    applyTabTitle(sessionStorage.getItem(tabTitleStorageKey), { persist: false });
+    const board = getCurrentBoard();
+    applyTabTitle(sessionStorage.getItem(getTabTitleStorageKey()) || board?.title, {
+      persist: false,
+      updateBoard: false,
+    });
   }
 
   function openTitleRename() {
@@ -244,13 +390,6 @@
     });
     tabOverlay.appendChild(toggleRedlines);
 
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.textContent = "x";
-    closeButton.setAttribute("aria-label", "Close tools");
-    closeButton.addEventListener("click", closeTabOverlay);
-    tabOverlay.appendChild(closeButton);
-
     document.body.appendChild(tabOverlay);
     syncTabOverlayState();
     return tabOverlay;
@@ -276,6 +415,186 @@
     } else {
       closeTabOverlay();
     }
+  }
+
+  function sortedBoards() {
+    return [...boards].sort((a, b) => {
+      if (a.pinned !== b.pinned) {
+        return a.pinned ? -1 : 1;
+      }
+      return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
+    });
+  }
+
+  function getBoardOverlay() {
+    if (boardOverlay) {
+      return boardOverlay;
+    }
+
+    boardOverlay = document.createElement("section");
+    boardOverlay.className = "board-overlay";
+    boardOverlay.hidden = true;
+    boardOverlay.setAttribute("aria-label", "Board history");
+    boardOverlay.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+    document.body.appendChild(boardOverlay);
+    renderBoardOverlay();
+    return boardOverlay;
+  }
+
+  function renderBoardOverlay() {
+    if (!boardOverlay) {
+      return;
+    }
+
+    boardOverlay.innerHTML = "";
+
+    const top = document.createElement("div");
+    top.className = "board-overlay-top";
+    const title = document.createElement("strong");
+    title.textContent = "Boards";
+    const hint = document.createElement("span");
+    hint.textContent = "Shift+Tab toggles";
+    top.appendChild(title);
+    top.appendChild(hint);
+    boardOverlay.appendChild(top);
+
+    const side = document.createElement("aside");
+    side.className = "board-overlay-side";
+
+    const newButton = document.createElement("button");
+    newButton.type = "button";
+    newButton.className = "board-new-button";
+    newButton.textContent = "+ New board";
+    newButton.addEventListener("click", createAndSwitchBoard);
+    side.appendChild(newButton);
+
+    const list = document.createElement("div");
+    list.className = "board-list";
+    for (const board of sortedBoards()) {
+      const row = document.createElement("div");
+      row.className = "board-row";
+      row.classList.toggle("is-current", board.id === currentBoardId);
+
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = "board-select";
+      select.addEventListener("click", () => switchBoard(board.id));
+      const name = document.createElement("span");
+      name.textContent = board.title || "Untitled board";
+      select.appendChild(name);
+      row.appendChild(select);
+
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "board-pin";
+      pin.textContent = board.pinned ? "Pinned" : "Pin";
+      pin.setAttribute("aria-pressed", board.pinned ? "true" : "false");
+      pin.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleBoardPin(board.id);
+      });
+      row.appendChild(pin);
+
+      list.appendChild(row);
+    }
+    side.appendChild(list);
+    boardOverlay.appendChild(side);
+  }
+
+  function openBoardOverlay() {
+    hideSpellingBubble();
+    closeTabOverlay();
+    const overlay = getBoardOverlay();
+    renderBoardOverlay();
+    overlay.hidden = false;
+  }
+
+  function closeBoardOverlay() {
+    if (boardOverlay) {
+      boardOverlay.hidden = true;
+    }
+  }
+
+  function toggleBoardOverlay() {
+    const overlay = getBoardOverlay();
+    if (overlay.hidden) {
+      openBoardOverlay();
+    } else {
+      closeBoardOverlay();
+    }
+  }
+
+  function switchBoard(boardId) {
+    if (!boards.some((board) => board.id === boardId)) {
+      return;
+    }
+    if (boardId === currentBoardId) {
+      return;
+    }
+
+    saveNotesNow();
+    saveViewNow();
+    currentBoardId = boardId;
+
+    const board = getCurrentBoard();
+    if (board) {
+      board.lastOpenedAt = Date.now();
+      saveBoardsIndex();
+    }
+
+    for (const element of paper.querySelectorAll(".image-note")) {
+      releaseImageElement(element);
+    }
+    loadState();
+    loadTabTitle();
+    applyView();
+    renderNotes();
+    if (!findBar.hidden) {
+      refreshFindMatches();
+    }
+    renderBoardOverlay();
+  }
+
+  function createAndSwitchBoard() {
+    saveNotesNow();
+    saveViewNow();
+    const board = createBoardRecord(`Board ${boards.length + 1}`);
+    boards.push(board);
+    currentBoardId = board.id;
+    writeSavedBoardState(board.id, {
+      version: 1,
+      boardId: board.id,
+      revision: Date.now(),
+      origin: clientId,
+      notes: [],
+    });
+    saveBoardsIndex();
+    notes = [];
+    boardRevision = 0;
+    migratedFromLegacy = false;
+    selectedNoteIds.clear();
+    undoStack = [];
+    redoStack = [];
+    textAddUndoIds.clear();
+    loadCurrentBoardView();
+    loadTabTitle();
+    applyView();
+    renderNotes();
+    renderBoardOverlay();
+  }
+
+  function toggleBoardPin(boardId) {
+    const board = boards.find((item) => item.id === boardId);
+    if (!board) {
+      return;
+    }
+    board.pinned = !board.pinned;
+    board.updatedAt = Date.now();
+    saveBoardsIndex();
+    renderBoardOverlay();
   }
 
   function nextRevision() {
@@ -487,7 +806,6 @@
   function handleBoardItemPointerDown(event, noteId) {
     const note = findNote(noteId);
     hideSpellingBubble();
-    closeTabOverlay();
 
     if (event.button === 2) {
       event.preventDefault();
@@ -1285,6 +1603,10 @@
 
   function applyIncomingBoard(state) {
     if (!state || state.origin === clientId || !Array.isArray(state.notes)) {
+      return;
+    }
+
+    if (state.boardId && state.boardId !== currentBoardId) {
       return;
     }
 
@@ -2649,7 +2971,6 @@
 
   function beginDrag(event) {
     hideSpellingBubble();
-    closeTabOverlay();
 
     if (event.button === 2) {
       event.preventDefault();
@@ -2830,7 +3151,13 @@
   });
 
   window.addEventListener("storage", (event) => {
-    if (event.key !== boardStorageKey || !event.newValue) {
+    if (event.key === boardsStorageKey && event.newValue) {
+      loadBoardsIndex();
+      renderBoardOverlay();
+      return;
+    }
+
+    if (event.key !== getBoardStorageKey(currentBoardId) || !event.newValue) {
       return;
     }
 
@@ -2865,7 +3192,11 @@
     if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab") {
       if (!findBar.contains(document.activeElement) && !titleBar.contains(document.activeElement)) {
         event.preventDefault();
-        toggleTabOverlay();
+        if (event.shiftKey) {
+          toggleBoardOverlay();
+        } else {
+          toggleTabOverlay();
+        }
         return;
       }
     }
@@ -2873,12 +3204,6 @@
     if (event.key === "Escape" && activeSpelling) {
       event.preventDefault();
       hideSpellingBubble();
-      return;
-    }
-
-    if (event.key === "Escape" && tabOverlay && !tabOverlay.hidden) {
-      event.preventDefault();
-      closeTabOverlay();
       return;
     }
 

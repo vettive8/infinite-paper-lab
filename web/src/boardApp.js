@@ -5,6 +5,7 @@ import {
   readBackupFile,
   readSameOriginLocalBoard,
 } from "./localImport.js";
+import { createSpellService } from "./spellingCore.js";
 
 export function createBoardApp(options) {
   const remoteApi = options.api;
@@ -44,6 +45,7 @@ export function createBoardApp(options) {
   const legacyBoardStorageKey = "infinite-paper:v8.1:board";
   const viewStorageKey = "infinite-paper:v8.1.1:view";
   const tabTitleStorageKey = "infinite-paper:v8.1.1:tab-title";
+  const redlineSettingsKey = `infinite-paper:web:redlines-enabled:${currentUserId}`;
   const syncChannelName = "infinite-paper:v8.1.1:sync";
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
@@ -55,6 +57,7 @@ export function createBoardApp(options) {
   const pastedImageMaxHeight = 540;
   const clientId = makeId();
   const syncChannel = "BroadcastChannel" in window ? new BroadcastChannel(syncChannelName) : null;
+  const spellService = createSpellService(`infinite-paper:web:personal-dictionary:${currentUserId}`);
   const imageBlobCache = new Map();
   let unsubscribeRemote = null;
   let destroyed = false;
@@ -82,6 +85,11 @@ export function createBoardApp(options) {
   let lastImagePasteSignature = "";
   let lastImagePasteAt = 0;
   let pasteStatusTimer = 0;
+  let spellHighlightTimer = 0;
+  let spellingBubble = null;
+  let activeSpelling = null;
+  let tabOverlay = null;
+  let redlinesEnabled = loadRedlinesEnabled();
   let tabTitle = defaultDocumentTitle;
   let view = {
     x: Math.round(window.innerWidth / 2),
@@ -189,6 +197,7 @@ export function createBoardApp(options) {
   }
 
   function openTitleRename() {
+    hideSpellingBubble();
     titleBar.hidden = false;
     titleInput.value = tabTitle;
     window.requestAnimationFrame(() => {
@@ -206,6 +215,100 @@ export function createBoardApp(options) {
     applyTabTitle(titleInput.value);
     closeTitleRename();
     showPasteStatus(tabTitle === defaultDocumentTitle ? "Tab title reset" : `Tab renamed: ${tabTitle}`);
+  }
+
+  function loadRedlinesEnabled() {
+    try {
+      return localStorage.getItem(redlineSettingsKey) !== "false";
+    } catch {
+      return true;
+    }
+  }
+
+  function saveRedlinesEnabled() {
+    try {
+      localStorage.setItem(redlineSettingsKey, redlinesEnabled ? "true" : "false");
+    } catch {
+      // Settings are optional; keep working if storage is unavailable.
+    }
+  }
+
+  function syncTabOverlayState() {
+    if (!tabOverlay) {
+      return;
+    }
+    const toggle = tabOverlay.querySelector("[data-action='toggle-redlines']");
+    if (!toggle) {
+      return;
+    }
+    toggle.textContent = redlinesEnabled ? "Redlines On" : "Redlines Off";
+    toggle.setAttribute("aria-pressed", redlinesEnabled ? "true" : "false");
+  }
+
+  function applyRedlineSetting() {
+    saveRedlinesEnabled();
+    syncTabOverlayState();
+    if (!redlinesEnabled) {
+      hideSpellingBubble();
+      CSS.highlights?.delete("app-spell-error");
+      return;
+    }
+    refreshSpellHighlightsSoon();
+  }
+
+  function getTabOverlay() {
+    if (tabOverlay) {
+      return tabOverlay;
+    }
+
+    tabOverlay = document.createElement("div");
+    tabOverlay.className = "tab-overlay";
+    tabOverlay.hidden = true;
+    tabOverlay.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+
+    const toggleRedlines = document.createElement("button");
+    toggleRedlines.type = "button";
+    toggleRedlines.dataset.action = "toggle-redlines";
+    toggleRedlines.addEventListener("click", () => {
+      redlinesEnabled = !redlinesEnabled;
+      applyRedlineSetting();
+    });
+    tabOverlay.appendChild(toggleRedlines);
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.textContent = "x";
+    closeButton.setAttribute("aria-label", "Close tools");
+    closeButton.addEventListener("click", closeTabOverlay);
+    tabOverlay.appendChild(closeButton);
+
+    document.body.appendChild(tabOverlay);
+    syncTabOverlayState();
+    return tabOverlay;
+  }
+
+  function openTabOverlay() {
+    hideSpellingBubble();
+    const overlay = getTabOverlay();
+    overlay.hidden = false;
+    syncTabOverlayState();
+  }
+
+  function closeTabOverlay() {
+    if (tabOverlay) {
+      tabOverlay.hidden = true;
+    }
+  }
+
+  function toggleTabOverlay() {
+    const overlay = getTabOverlay();
+    if (overlay.hidden) {
+      openTabOverlay();
+    } else {
+      closeTabOverlay();
+    }
   }
 
   function nextRevision() {
@@ -424,6 +527,9 @@ export function createBoardApp(options) {
 
   function handleBoardItemPointerDown(event, noteId) {
     const note = findNote(noteId);
+    hideSpellingBubble();
+    closeTabOverlay();
+
     if (event.button === 2) {
       event.preventDefault();
       event.stopPropagation();
@@ -461,7 +567,7 @@ export function createBoardApp(options) {
     const element = document.createElement("div");
     element.className = "board-item note";
     element.contentEditable = "plaintext-only";
-    element.spellcheck = true;
+    element.spellcheck = false;
     element.dataset.id = noteId;
     element.dataset.type = "text";
     element.style.left = `${note.x}px`;
@@ -470,6 +576,10 @@ export function createBoardApp(options) {
 
     element.addEventListener("pointerdown", (event) => {
       handleBoardItemPointerDown(event, noteId);
+    });
+
+    element.addEventListener("click", (event) => {
+      handleSpellClick(event, element);
     });
 
     element.addEventListener("input", () => {
@@ -483,6 +593,8 @@ export function createBoardApp(options) {
       if (!findBar.hidden) {
         refreshFindMatches();
       }
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
       saveNotesSoon();
     });
 
@@ -496,6 +608,7 @@ export function createBoardApp(options) {
         removeUndoAddReferences([noteId]);
         removeNote(noteId);
       } else {
+        refreshSpellHighlightsSoon();
         saveNotesSoon();
       }
     });
@@ -505,6 +618,7 @@ export function createBoardApp(options) {
         return;
       }
       if (event.key === "Escape") {
+        hideSpellingBubble();
         element.blur();
         window.getSelection()?.removeAllRanges();
       }
@@ -676,6 +790,273 @@ export function createBoardApp(options) {
     pasteStatusTimer = window.setTimeout(() => {
       status.hidden = true;
     }, 1800);
+  }
+
+  function isSpellWordCharacter(character) {
+    return /[\p{L}']/u.test(character || "");
+  }
+
+  function getWordRangeFromPoint(clientX, clientY, element) {
+    let caretRange = null;
+    if (document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(clientX, clientY);
+      if (position) {
+        caretRange = document.createRange();
+        caretRange.setStart(position.offsetNode, position.offset);
+        caretRange.collapse(true);
+      }
+    } else if (document.caretRangeFromPoint) {
+      caretRange = document.caretRangeFromPoint(clientX, clientY);
+    }
+
+    if (!caretRange || !element.contains(caretRange.startContainer)) {
+      return null;
+    }
+
+    let node = caretRange.startContainer;
+    let offset = caretRange.startOffset;
+    if (node.nodeType !== Node.TEXT_NODE) {
+      node = node.childNodes[offset] || node.childNodes[offset - 1];
+      offset = node?.nodeValue?.length || 0;
+    }
+    if (!node || node.nodeType !== Node.TEXT_NODE || !element.contains(node)) {
+      return null;
+    }
+
+    const text = node.nodeValue || "";
+    let index = Math.min(offset, text.length - 1);
+    if (!isSpellWordCharacter(text[index]) && offset > 0) {
+      index = offset - 1;
+    }
+    if (!isSpellWordCharacter(text[index])) {
+      return null;
+    }
+
+    let start = index;
+    let end = index + 1;
+    while (start > 0 && isSpellWordCharacter(text[start - 1])) start -= 1;
+    while (end < text.length && isSpellWordCharacter(text[end])) end += 1;
+
+    const word = text.slice(start, end).replace(/^'+|'+$/g, "");
+    if (!word) {
+      return null;
+    }
+
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    return { word, range, element, node, start, end };
+  }
+
+  function collectMisspelledRanges() {
+    const ranges = [];
+    for (const element of paper.querySelectorAll(".note")) {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.nodeValue || "";
+        const matches = text.matchAll(/[\p{L}'][\p{L}']*/gu);
+        for (const match of matches) {
+          const word = match[0].replace(/^'+|'+$/g, "");
+          if (!word || spellService.isCorrect(word)) {
+            continue;
+          }
+          const range = document.createRange();
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + match[0].length);
+          ranges.push(range);
+        }
+      }
+    }
+    return ranges;
+  }
+
+  function refreshSpellHighlights() {
+    if (!CSS.highlights || !window.Highlight) {
+      return;
+    }
+    CSS.highlights.delete("app-spell-error");
+    if (!redlinesEnabled) {
+      return;
+    }
+    const ranges = collectMisspelledRanges();
+    if (ranges.length) {
+      CSS.highlights.set("app-spell-error", new Highlight(...ranges));
+    }
+  }
+
+  function refreshSpellHighlightsSoon() {
+    window.clearTimeout(spellHighlightTimer);
+    spellHighlightTimer = window.setTimeout(refreshSpellHighlights, 80);
+  }
+
+  function getSpellingBubble() {
+    if (spellingBubble) {
+      return spellingBubble;
+    }
+    spellingBubble = document.createElement("div");
+    spellingBubble.className = "spelling-bubble";
+    spellingBubble.hidden = true;
+    spellingBubble.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+    document.body.appendChild(spellingBubble);
+    return spellingBubble;
+  }
+
+  function hideSpellingBubble() {
+    activeSpelling = null;
+    if (spellingBubble) {
+      spellingBubble.hidden = true;
+    }
+  }
+
+  function positionSpellingBubble(range, event) {
+    const bubble = getSpellingBubble();
+    const rect = range.getBoundingClientRect();
+    const left = rect.left || event.clientX;
+    const top = rect.top || event.clientY;
+    window.requestAnimationFrame(() => {
+      const bubbleWidth = bubble.offsetWidth || 260;
+      const bubbleHeight = bubble.offsetHeight || 44;
+      const maxLeft = Math.max(8, window.innerWidth - bubbleWidth - 8);
+      const maxTop = Math.max(8, window.innerHeight - bubbleHeight - 8);
+      bubble.style.left = `${clamp(left, 8, maxLeft)}px`;
+      bubble.style.top = `${clamp(top - bubbleHeight - 8, 8, maxTop)}px`;
+    });
+  }
+
+  function replaceActiveSpellingWord(value) {
+    if (!activeSpelling) {
+      return;
+    }
+    const replacement = value;
+    const { element, node, start, end } = activeSpelling;
+    if (!node?.isConnected || !element.contains(node)) {
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
+      return;
+    }
+
+    const textLength = node.nodeValue ? node.nodeValue.length : 0;
+    if (start > textLength) {
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
+      return;
+    }
+
+    const currentNote = findNote(element.dataset.id);
+    if (!currentNote) {
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
+      return;
+    }
+
+    currentNote.text = getNoteText(element);
+    const beforeItem = { note: cloneNote(currentNote) };
+    const safeEnd = Math.min(end, textLength);
+    node.nodeValue = `${node.nodeValue.slice(0, start)}${replacement}${node.nodeValue.slice(safeEnd)}`;
+
+    element.focus({ preventScroll: true });
+    const caret = document.createRange();
+    caret.setStart(node, start + replacement.length);
+    caret.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(caret);
+
+    currentNote.text = getNoteText(element);
+    if (beforeItem.note.text !== currentNote.text) {
+      dirtyNoteIds.add(currentNote.id);
+      pushUndoAction({ type: "spell-replace", items: [beforeItem] });
+      saveNotesSoon();
+    }
+    hideSpellingBubble();
+    refreshSpellHighlightsSoon();
+  }
+
+  function showSpellingBubble(match, event) {
+    const bubble = getSpellingBubble();
+    const suggestions = spellService.suggestions(match.word);
+    activeSpelling = match;
+    bubble.innerHTML = "";
+
+    suggestions.forEach((suggestion, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = index === 0 ? "spelling-primary" : "";
+      button.textContent = suggestion;
+      button.addEventListener("pointerdown", (event) => event.preventDefault());
+      button.addEventListener("click", () => replaceActiveSpellingWord(suggestion));
+      bubble.appendChild(button);
+    });
+
+    if (!suggestions.length) {
+      const empty = document.createElement("span");
+      empty.className = "spelling-empty";
+      empty.textContent = "No suggestions";
+      bubble.appendChild(empty);
+    }
+
+    const ignoreButton = document.createElement("button");
+    ignoreButton.type = "button";
+    ignoreButton.textContent = "Ignore";
+    ignoreButton.addEventListener("click", () => {
+      const word = spellService.ignore(match.word);
+      if (word) {
+        pushUndoAction({ type: "spell-ignore", word });
+      }
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
+    });
+    bubble.appendChild(ignoreButton);
+
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.textContent = "Add";
+    addButton.addEventListener("click", () => {
+      const word = spellService.add(match.word);
+      if (word) {
+        pushUndoAction({ type: "spell-add", word });
+      }
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
+    });
+    bubble.appendChild(addButton);
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "spelling-close";
+    closeButton.textContent = "x";
+    closeButton.addEventListener("click", hideSpellingBubble);
+    bubble.appendChild(closeButton);
+
+    bubble.hidden = false;
+    positionSpellingBubble(match.range, event);
+  }
+
+  function handleSpellClick(event, element) {
+    if (!redlinesEnabled) {
+      hideSpellingBubble();
+      return;
+    }
+
+    if (
+      event.button !== 0 ||
+      event.shiftKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      selectedNoteIds.has(element.dataset.id)
+    ) {
+      return;
+    }
+    const match = getWordRangeFromPoint(event.clientX, event.clientY, element);
+    if (!match || spellService.isCorrect(match.word)) {
+      hideSpellingBubble();
+      return;
+    }
+    showSpellingBubble(match, event);
   }
 
   function hasSelectionOutsideActiveNote(activeNote) {
@@ -897,6 +1278,7 @@ export function createBoardApp(options) {
       paper.appendChild(createNoteElement(note));
     }
     updateSelectedNoteStyles();
+    refreshSpellHighlightsSoon();
   }
 
   function renderSyncedNotes() {
@@ -939,6 +1321,7 @@ export function createBoardApp(options) {
 
     pruneSelectedNotes();
     updateSelectedNoteStyles();
+    refreshSpellHighlightsSoon();
   }
 
   function applyIncomingBoard(state) {
@@ -1094,6 +1477,7 @@ export function createBoardApp(options) {
     const element = createNoteElement(note);
     paper.appendChild(element);
     focusAtEnd(element);
+    refreshSpellHighlightsSoon();
     saveNotesSoon();
   }
 
@@ -1125,6 +1509,10 @@ export function createBoardApp(options) {
     }
 
     updateSelectedNoteStyles();
+    if (removedNotes.length) {
+      hideSpellingBubble();
+      refreshSpellHighlightsSoon();
+    }
     if (shouldSave) {
       saveNotesSoon();
     }
@@ -1141,6 +1529,7 @@ export function createBoardApp(options) {
   }
 
   function openFind() {
+    hideSpellingBubble();
     syncNotesFromDom();
     const selectedText = window.getSelection()?.toString().trim();
     findBar.hidden = false;
@@ -2156,7 +2545,20 @@ export function createBoardApp(options) {
     if (action.type === "update") {
       return "change";
     }
+    if (action.type === "spell-ignore") {
+      return "ignore";
+    }
+    if (action.type === "spell-add") {
+      return "dictionary add";
+    }
+    if (action.type === "spell-replace") {
+      return "correction";
+    }
     return "action";
+  }
+
+  function isSpellAction(action) {
+    return action?.type === "spell-ignore" || action?.type === "spell-add" || action?.type === "spell-replace";
   }
 
   async function undoLastAction() {
@@ -2188,13 +2590,29 @@ export function createBoardApp(options) {
         return true;
       }
 
-      if (action.type === "update") {
+      if (action.type === "update" || action.type === "spell-replace") {
         const redoItems = captureNoteSnapshots(getActionIds(action));
         restoreNoteSnapshots(action.items || []);
         if (redoItems.length) {
-          pushRedoAction({ type: "update", items: redoItems });
+          pushRedoAction({ type: action.type, items: redoItems });
         }
         showPasteStatus(`Undid ${getActionName(action)}. Ctrl+Y to redo`);
+        return true;
+      }
+
+      if (action.type === "spell-ignore") {
+        spellService.unignore(action.word);
+        refreshSpellHighlightsSoon();
+        pushRedoAction(action);
+        showPasteStatus("Undid ignore. Ctrl+Y to redo");
+        return true;
+      }
+
+      if (action.type === "spell-add") {
+        spellService.remove(action.word);
+        refreshSpellHighlightsSoon();
+        pushRedoAction(action);
+        showPasteStatus("Undid dictionary add. Ctrl+Y to redo");
         return true;
       }
     } finally {
@@ -2230,13 +2648,29 @@ export function createBoardApp(options) {
         return true;
       }
 
-      if (action.type === "update") {
+      if (action.type === "update" || action.type === "spell-replace") {
         const undoItems = captureNoteSnapshots(getActionIds(action));
         restoreNoteSnapshots(action.items || []);
         if (undoItems.length) {
-          pushUndoAction({ type: "update", items: undoItems }, { clearRedo: false });
+          pushUndoAction({ type: action.type, items: undoItems }, { clearRedo: false });
         }
         showPasteStatus(`Redid ${getActionName(action)}`);
+        return true;
+      }
+
+      if (action.type === "spell-ignore") {
+        spellService.ignore(action.word);
+        refreshSpellHighlightsSoon();
+        pushUndoAction(action, { clearRedo: false });
+        showPasteStatus("Redid ignore");
+        return true;
+      }
+
+      if (action.type === "spell-add") {
+        spellService.add(action.word);
+        refreshSpellHighlightsSoon();
+        pushUndoAction(action, { clearRedo: false });
+        showPasteStatus("Redid dictionary add");
         return true;
       }
     } finally {
@@ -2265,6 +2699,9 @@ export function createBoardApp(options) {
   }
 
   function beginDrag(event) {
+    hideSpellingBubble();
+    closeTabOverlay();
+
     if (event.button === 2) {
       event.preventDefault();
       startSelectionDrag(event);
@@ -2476,6 +2913,31 @@ export function createBoardApp(options) {
   );
 
   window.addEventListener("keydown", (event) => {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab") {
+      const isPanelInput =
+        findBar.contains(document.activeElement) ||
+        titleBar.contains(document.activeElement) ||
+        sharePanel.contains(document.activeElement) ||
+        importPanel.contains(document.activeElement);
+      if (!isPanelInput) {
+        event.preventDefault();
+        toggleTabOverlay();
+        return;
+      }
+    }
+
+    if (event.key === "Escape" && activeSpelling) {
+      event.preventDefault();
+      hideSpellingBubble();
+      return;
+    }
+
+    if (event.key === "Escape" && tabOverlay && !tabOverlay.hidden) {
+      event.preventDefault();
+      closeTabOverlay();
+      return;
+    }
+
     if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "F2") {
       event.preventDefault();
       openTitleRename();
@@ -2553,27 +3015,36 @@ export function createBoardApp(options) {
       event.shiftKey &&
       event.key.toLocaleLowerCase() === "z"
     ) {
-      if (shouldUseBoardShortcut(activeTextNote) && redoStack.length) {
+      if ((isSpellAction(redoStack.at(-1)) || shouldUseBoardShortcut(activeTextNote)) && redoStack.length) {
         event.preventDefault();
-        removeActiveEmptyTextNote(activeTextNote);
+        if (!isSpellAction(redoStack.at(-1))) {
+          removeActiveEmptyTextNote(activeTextNote);
+        }
         redoLastAction();
       }
       return;
     }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "y") {
-      if (shouldUseBoardShortcut(activeTextNote) && redoStack.length) {
+      if ((isSpellAction(redoStack.at(-1)) || shouldUseBoardShortcut(activeTextNote)) && redoStack.length) {
         event.preventDefault();
-        removeActiveEmptyTextNote(activeTextNote);
+        if (!isSpellAction(redoStack.at(-1))) {
+          removeActiveEmptyTextNote(activeTextNote);
+        }
         redoLastAction();
       }
       return;
     }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "z") {
-      if (shouldUseBoardShortcut(activeTextNote) && (undoStack.length || selectedNoteIds.size)) {
+      if (
+        isSpellAction(undoStack.at(-1)) ||
+        (shouldUseBoardShortcut(activeTextNote) && (undoStack.length || selectedNoteIds.size))
+      ) {
         event.preventDefault();
-        removeActiveEmptyTextNote(activeTextNote);
+        if (!isSpellAction(undoStack.at(-1))) {
+          removeActiveEmptyTextNote(activeTextNote);
+        }
         undoOrDeleteSelection();
       }
       return;
@@ -2825,6 +3296,13 @@ export function createBoardApp(options) {
     window.clearTimeout(noteSaveTimer);
     window.clearTimeout(viewSaveTimer);
     window.clearTimeout(remoteReloadTimer);
+    window.clearTimeout(spellHighlightTimer);
+    CSS.highlights?.delete("app-spell-error");
+    spellingBubble?.remove();
+    spellingBubble = null;
+    tabOverlay?.remove();
+    tabOverlay = null;
+    activeSpelling = null;
     saveNotesNow();
     saveViewNow();
     destroyed = true;
