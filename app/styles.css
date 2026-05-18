@@ -576,29 +576,16 @@ body {
 }
 
 .image-rotate-control {
-  top: -34px;
-  left: 50%;
+  top: -21px;
+  right: -21px;
   width: 19px;
   height: 19px;
   display: grid;
   place-items: center;
-  transform: translateX(-50%);
   color: #3478f6;
   font-size: 12px;
   line-height: 1;
   cursor: grab;
-}
-
-/* short stem connecting the rotate handle to the image's top edge */
-.image-rotate-control::before {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  width: 2px;
-  height: 16px;
-  transform: translateX(-50%);
-  background: #3478f6;
 }
 
 .image-mirror-control {
