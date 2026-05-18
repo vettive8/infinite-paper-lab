@@ -91,6 +91,14 @@ function serializeBoard(board) {
 
   for (const note of board.notes || []) {
     if (note.type === "image") {
+      const crop = note.crop || {};
+      const cropStr = [crop.x, crop.y, crop.w, crop.h]
+        .map((value, index) => {
+          const n = Number(value);
+          const fallback = index < 2 ? 0 : 1;
+          return Math.round((Number.isFinite(n) ? n : fallback) * 1e4) / 1e4;
+        })
+        .join(",");
       const attrs = [
         `id=${note.id}`,
         "type=image",
@@ -101,6 +109,7 @@ function serializeBoard(board) {
         `rotation=${Number(note.rotation) || 0}`,
         `flipX=${note.flipX ? "true" : "false"}`,
         `flipY=${note.flipY ? "true" : "false"}`,
+        `crop=${cropStr}`,
         `imageId=${note.imageId || ""}`,
         `mimeType=${note.mimeType || "image/png"}`,
       ].join(" ");
@@ -179,6 +188,9 @@ function parseBoard(text) {
     }
     const body = m[2];
     if (attrs.type === "image") {
+      const cropParts = String(attrs.crop || "0,0,1,1")
+        .split(",")
+        .map(Number);
       board.notes.push({
         id: attrs.id,
         type: "image",
@@ -189,6 +201,12 @@ function parseBoard(text) {
         rotation: Number(attrs.rotation) || 0,
         flipX: attrs.flipX === "true",
         flipY: attrs.flipY === "true",
+        crop: {
+          x: Number.isFinite(cropParts[0]) ? cropParts[0] : 0,
+          y: Number.isFinite(cropParts[1]) ? cropParts[1] : 0,
+          w: Number.isFinite(cropParts[2]) ? cropParts[2] : 1,
+          h: Number.isFinite(cropParts[3]) ? cropParts[3] : 1,
+        },
         imageId: attrs.imageId || "",
         mimeType: attrs.mimeType || "image/png",
       });

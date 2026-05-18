@@ -626,6 +626,51 @@ body {
   cursor: nwse-resize;
 }
 
+.image-crop-frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.image-crop-control {
+  left: -7px;
+  bottom: -7px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  color: #3478f6;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-crop-editor {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.image-note.is-cropping .image-crop-editor {
+  display: block;
+}
+
+.image-note.is-cropping .image-controls {
+  display: none;
+}
+
+.crop-rubber {
+  position: absolute;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 45%);
+  pointer-events: none;
+}
+
 .board-item.is-selected {
   outline: 1px solid #3478f6;
   background: rgb(52 120 246 / 8%);

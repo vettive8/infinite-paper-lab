@@ -22,6 +22,7 @@ export const config = {
   cwd: ".",
   url: `http://127.0.0.1:${PORT}`,
   env: { PORT: String(PORT), NOTES_DIR: TEST_NOTES },
+  permissions: ["clipboard-read", "clipboard-write"],
   slowMo: 380, // slow enough to watch each action live
   stepPauseMs: 1100, // pause after each step so the result is visible
   readyTimeoutMs: 20000,
@@ -149,6 +150,80 @@ export async function run({ page, step, expect, config }) {
     expect(
       JSON.stringify(after) !== JSON.stringify(before),
       `board order did not change (${before} -> ${after})`
+    );
+  });
+
+  await step("pasting an image creates an image note", async () => {
+    await page.keyboard.press("Shift+Tab"); // close the board overlay
+    await page.waitForTimeout(300);
+    // Put a 240x240 four-colour-quadrant PNG on the clipboard.
+    await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 240;
+      canvas.height = 240;
+      const ctx = canvas.getContext("2d");
+      const quads = [
+        ["#e2392f", 0, 0],
+        ["#27a44d", 120, 0],
+        ["#2b74d6", 0, 120],
+        ["#f6b500", 120, 120],
+      ];
+      for (const [color, x, y] of quads) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, 120, 120);
+      }
+      const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob }),
+      ]);
+    });
+    await page.keyboard.press("Control+V");
+    await waitFor(
+      async () => (await page.locator(".image-note").count()) >= 1,
+      6000,
+      "an image note to appear on the canvas"
+    );
+    await page.waitForTimeout(500); // settle — a duplicate would show now
+    const imageCount = await page.locator(".image-note").count();
+    expect(imageCount === 1, `expected exactly one image note, got ${imageCount}`);
+  });
+
+  await step("cropping an image trims it to the dragged region", async () => {
+    const imageNote = page.locator(".image-note").first();
+    await imageNote.click(); // select it so its controls show
+    await page.waitForTimeout(200);
+    const before = await imageNote.boundingBox();
+
+    await imageNote.locator(".image-crop-control").click();
+    await page.waitForTimeout(300);
+
+    // Drag a box over roughly the top-left quadrant of the image.
+    const sx = before.x + before.width * 0.12;
+    const sy = before.y + before.height * 0.12;
+    const ex = before.x + before.width * 0.52;
+    const ey = before.y + before.height * 0.52;
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    await page.mouse.move(ex, ey, { steps: 14 });
+    await page.mouse.up();
+    await page.waitForTimeout(1500); // long enough for any save echo to settle
+
+    const after = await imageNote.boundingBox();
+    expect(
+      after.width < before.width * 0.7,
+      `image was not cropped narrower (${Math.round(before.width)} -> ${Math.round(
+        after.width
+      )})`
+    );
+
+    // The .md must record a real, non-default crop region.
+    const imageLine = boardFiles()
+      .flatMap((f) => fs.readFileSync(f, "utf8").split("\n"))
+      .find((line) => line.includes("type=image"));
+    const cropMatch = (imageLine || "").match(/crop=([^ ]+)/);
+    expect(
+      Boolean(cropMatch) && cropMatch[1] !== "0,0,1,1",
+      `crop not applied in the .md (crop=${cropMatch ? cropMatch[1] : "none"})`
     );
   });
 }

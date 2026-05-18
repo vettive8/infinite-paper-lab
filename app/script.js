@@ -1406,6 +1406,7 @@
           rotation: normalizeRotation(note.rotation),
           flipX: Boolean(note.flipX),
           flipY: Boolean(note.flipY),
+          crop: cleanCrop(note.crop),
         };
       }
 
@@ -1446,6 +1447,7 @@
         rotation: normalizeRotation(note.rotation),
         flipX: Boolean(note.flipX),
         flipY: Boolean(note.flipY),
+        crop: cleanCrop(note.crop),
       }));
   }
 
@@ -1456,6 +1458,32 @@
   function normalizeRotation(value) {
     const degrees = Number(value) || 0;
     return ((degrees % 360) + 360) % 360;
+  }
+
+  // A crop is the fraction {x, y, w, h} of the natural image that is shown.
+  // {0,0,1,1} means the whole image (no crop).
+  function cleanCrop(crop) {
+    const source = crop && typeof crop === "object" ? crop : {};
+    const num = (value, fallback) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    let x = clamp(num(source.x, 0), 0, 1);
+    let y = clamp(num(source.y, 0), 0, 1);
+    let w = clamp(num(source.w, 1), 0.02, 1);
+    let h = clamp(num(source.h, 1), 0.02, 1);
+    if (x + w > 1) {
+      w = 1 - x;
+    }
+    if (y + h > 1) {
+      h = 1 - y;
+    }
+    return { x, y, w, h };
+  }
+
+  function isCropped(crop) {
+    const c = cleanCrop(crop);
+    return c.x > 0.0005 || c.y > 0.0005 || c.w < 0.9995 || c.h < 0.9995;
   }
 
   function makeId() {
@@ -1698,10 +1726,13 @@
     element.style.left = `${note.x}px`;
     element.style.top = `${note.y}px`;
 
+    const cropFrame = document.createElement("div");
+    cropFrame.className = "image-crop-frame";
     const image = document.createElement("img");
     image.alt = "Pasted image";
     image.draggable = false;
-    element.appendChild(image);
+    cropFrame.appendChild(image);
+    element.appendChild(cropFrame);
 
     const controls = document.createElement("div");
     controls.className = "image-controls";
@@ -1755,11 +1786,40 @@
       startImageTransform(event, noteId, "resize");
     });
 
+    const cropButton = document.createElement("button");
+    cropButton.type = "button";
+    cropButton.className = "image-control image-crop-control";
+    cropButton.title = "Crop";
+    cropButton.textContent = "⛶";
+    cropButton.setAttribute("aria-label", "Crop image");
+    cropButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    cropButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleCropMode(noteId);
+    });
+
     controls.appendChild(rotateHandle);
     controls.appendChild(mirrorHorizontalButton);
     controls.appendChild(mirrorVerticalButton);
+    controls.appendChild(cropButton);
     controls.appendChild(resizeHandle);
     element.appendChild(controls);
+
+    const cropEditor = document.createElement("div");
+    cropEditor.className = "image-crop-editor";
+    cropEditor.setAttribute("aria-hidden", "true");
+    const cropRubber = document.createElement("div");
+    cropRubber.className = "crop-rubber";
+    cropRubber.hidden = true;
+    cropEditor.appendChild(cropRubber);
+    cropEditor.addEventListener("pointerdown", (event) => {
+      startCropRubber(event, noteId);
+    });
+    element.appendChild(cropEditor);
 
     applyImageGeometry(element, note);
     loadImageIntoElement(note, image);
@@ -1788,6 +1848,7 @@
     const width = note.width || 320;
     const height = note.height || 180;
     const rotation = normalizeRotation(note.rotation);
+    const crop = cleanCrop(note.crop);
     const image = element.querySelector("img");
 
     element.style.width = `${width}px`;
@@ -1799,11 +1860,32 @@
       return;
     }
 
-    image.style.width = "100%";
-    image.style.height = "100%";
     image.style.transform = `${note.flipX ? "scaleX(-1)" : "scaleX(1)"} ${
       note.flipY ? "scaleY(-1)" : "scaleY(1)"
     }`;
+
+    if (!isCropped(crop)) {
+      image.style.position = "";
+      image.style.left = "";
+      image.style.top = "";
+      image.style.width = "100%";
+      image.style.height = "100%";
+      image.style.objectFit = "";
+      return;
+    }
+
+    // Cropped: scale the image up and offset it inside the clipped frame so
+    // only the crop region shows.
+    const fullWidth = width / crop.w;
+    const fullHeight = height / crop.h;
+    const fracX = note.flipX ? 1 - crop.x - crop.w : crop.x;
+    const fracY = note.flipY ? 1 - crop.y - crop.h : crop.y;
+    image.style.position = "absolute";
+    image.style.left = `${-fracX * fullWidth}px`;
+    image.style.top = `${-fracY * fullHeight}px`;
+    image.style.width = `${fullWidth}px`;
+    image.style.height = `${fullHeight}px`;
+    image.style.objectFit = "fill";
   }
 
   function setSelectedNotes(ids) {
@@ -3273,14 +3355,22 @@
     }
   }
 
+  let imagePasteActive = false;
+
   async function pasteImageBlobs(images, activeTextNote) {
     if (!images.length) {
       return false;
     }
 
-    if (isRecentImagePaste(images)) {
+    // One Ctrl+V fires both a `paste` and a `beforeinput` event. Guard
+    // against pasting the same image twice: imagePasteActive blocks a
+    // second call while the first is still running, isRecentImagePaste
+    // blocks one that arrives just after the first finishes.
+    if (imagePasteActive || isRecentImagePaste(images)) {
       return true;
     }
+    imagePasteActive = true;
+    rememberImagePaste(images);
 
     syncNotesFromDom();
     if (shouldUseBoardShortcut(activeTextNote)) {
@@ -3304,17 +3394,20 @@
     if (addedIds.length) {
       setSelectedNotes(addedIds);
       pushUndoAction({ type: "add", ids: addedIds });
-      rememberImagePaste(images);
       saveNotesNow();
       showPasteStatus(`Pasted ${addedIds.length} image${addedIds.length === 1 ? "" : "s"}`);
     } else {
       showPasteStatus("Image paste failed", true);
     }
 
+    imagePasteActive = false;
     return addedIds.length > 0;
   }
 
+  let lastPasteEventAt = 0;
+
   async function handlePaste(event) {
+    lastPasteEventAt = performance.now();
     if (findBar.contains(document.activeElement)) {
       return;
     }
@@ -3362,6 +3455,12 @@
     if (event.inputType !== "insertFromPaste" || findBar.contains(document.activeElement)) {
       return;
     }
+    // A Ctrl+V fires both `paste` and `beforeinput`. handlePaste owns the
+    // gesture (it also covers the slow clipboard fallbacks), so defer here
+    // whenever a paste event has just fired.
+    if (performance.now() - lastPasteEventAt < 1000) {
+      return;
+    }
 
     const images = getDataTransferImages(event.dataTransfer);
     if (!images.length) {
@@ -3375,7 +3474,15 @@
   async function probeKeyboardImagePaste(activeTextNote) {
     const probeId = ++keyboardImagePasteProbe;
     const images = await readFallbackClipboardImages();
-    if (probeId !== keyboardImagePasteProbe || !images.length || isRecentImagePaste(images)) {
+    // This probe is only a fallback for when no `paste` event fires. If a
+    // paste event did fire for this Ctrl+V, handlePaste already handled it
+    // — bail, or the image is pasted twice.
+    if (
+      probeId !== keyboardImagePasteProbe ||
+      !images.length ||
+      isRecentImagePaste(images) ||
+      performance.now() - lastPasteEventAt < 2500
+    ) {
       return;
     }
 
@@ -3533,6 +3640,173 @@
 
     pushUndoAction({ type: "update", items: activeDrag.snapshots });
     saveNotesNow();
+  }
+
+  // --- image crop -------------------------------------------------------
+
+  let cropModeNoteId = "";
+  let cropDrag = null;
+
+  function toggleCropMode(noteId) {
+    if (cropModeNoteId === noteId) {
+      exitCropMode();
+    } else {
+      enterCropMode(noteId);
+    }
+  }
+
+  function enterCropMode(noteId) {
+    exitCropMode();
+    const note = findNote(noteId);
+    if (!note || note.type !== "image") {
+      return;
+    }
+    cropModeNoteId = noteId;
+    setSelectedNotes([noteId]);
+    paper
+      .querySelector(`[data-id="${CSS.escape(noteId)}"]`)
+      ?.classList.add("is-cropping");
+    showPasteStatus("Crop: drag a box over the image");
+  }
+
+  function exitCropMode() {
+    if (!cropModeNoteId) {
+      return;
+    }
+    const element = paper.querySelector(
+      `[data-id="${CSS.escape(cropModeNoteId)}"]`
+    );
+    if (element) {
+      element.classList.remove("is-cropping");
+      const rubber = element.querySelector(".crop-rubber");
+      if (rubber) {
+        rubber.hidden = true;
+      }
+    }
+    cropDrag = null;
+    cropModeNoteId = "";
+  }
+
+  function positionRubber(rubber, ax, ay, bx, by) {
+    rubber.style.left = `${Math.min(ax, bx)}px`;
+    rubber.style.top = `${Math.min(ay, by)}px`;
+    rubber.style.width = `${Math.abs(bx - ax)}px`;
+    rubber.style.height = `${Math.abs(by - ay)}px`;
+  }
+
+  function startCropRubber(event, noteId) {
+    if (cropModeNoteId !== noteId || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const note = findNote(noteId);
+    if (!note) {
+      return;
+    }
+    const editor = event.currentTarget;
+    cropDrag = {
+      noteId,
+      editor,
+      rubber: editor.querySelector(".crop-rubber"),
+      pointerId: event.pointerId,
+      rotation: normalizeRotation(note.rotation),
+      startX: event.offsetX,
+      startY: event.offsetY,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      curX: event.offsetX,
+      curY: event.offsetY,
+    };
+    editor.setPointerCapture(event.pointerId);
+    editor.addEventListener("pointermove", onCropRubberMove);
+    editor.addEventListener("pointerup", endCropRubber);
+    editor.addEventListener("pointercancel", endCropRubber);
+    cropDrag.rubber.hidden = false;
+    positionRubber(
+      cropDrag.rubber,
+      cropDrag.startX,
+      cropDrag.startY,
+      cropDrag.startX,
+      cropDrag.startY
+    );
+  }
+
+  function onCropRubberMove(event) {
+    if (!cropDrag) {
+      return;
+    }
+    // Convert the screen-space pointer delta into the image's own
+    // (unscaled, unrotated) coordinate space.
+    const scale = view.scale || 1;
+    const radians = cropDrag.rotation * (Math.PI / 180);
+    const dx = (event.clientX - cropDrag.startClientX) / scale;
+    const dy = (event.clientY - cropDrag.startClientY) / scale;
+    cropDrag.curX = cropDrag.startX + dx * Math.cos(radians) + dy * Math.sin(radians);
+    cropDrag.curY = cropDrag.startY - dx * Math.sin(radians) + dy * Math.cos(radians);
+    positionRubber(
+      cropDrag.rubber,
+      cropDrag.startX,
+      cropDrag.startY,
+      cropDrag.curX,
+      cropDrag.curY
+    );
+  }
+
+  function endCropRubber(event) {
+    if (!cropDrag) {
+      return;
+    }
+    const drag = cropDrag;
+    cropDrag = null;
+    drag.editor.releasePointerCapture?.(drag.pointerId);
+    drag.editor.removeEventListener("pointermove", onCropRubberMove);
+    drag.editor.removeEventListener("pointerup", endCropRubber);
+    drag.editor.removeEventListener("pointercancel", endCropRubber);
+    drag.rubber.hidden = true;
+
+    const rx = Math.min(drag.startX, drag.curX);
+    const ry = Math.min(drag.startY, drag.curY);
+    const rw = Math.abs(drag.curX - drag.startX);
+    const rh = Math.abs(drag.curY - drag.startY);
+    if (event.type !== "pointerup" || rw < 8 || rh < 8) {
+      exitCropMode();
+      return;
+    }
+    applyCrop(drag.noteId, rx, ry, rw, rh);
+  }
+
+  function applyCrop(noteId, rx, ry, rw, rh) {
+    const note = findNote(noteId);
+    if (!note || note.type !== "image") {
+      exitCropMode();
+      return;
+    }
+    const width = note.width || 320;
+    const height = note.height || 180;
+    const left = clamp(rx, 0, width);
+    const top = clamp(ry, 0, height);
+    const cropW = clamp(rw, 8, width - left);
+    const cropH = clamp(rh, 8, height - top);
+
+    const snapshots = captureNoteSnapshots([noteId]);
+    const current = cleanCrop(note.crop);
+    note.crop = cleanCrop({
+      x: current.x + (left / width) * current.w,
+      y: current.y + (top / height) * current.h,
+      w: (cropW / width) * current.w,
+      h: (cropH / height) * current.h,
+    });
+    note.width = Math.round(cropW);
+    note.height = Math.round(cropH);
+    note.x += Math.round(left);
+    note.y += Math.round(top);
+
+    exitCropMode();
+    updateImageTransformElement(note);
+    pushUndoAction({ type: "update", items: snapshots });
+    saveNotesNow();
+    showPasteStatus("Image cropped");
   }
 
   async function deleteSelectedNotes() {
@@ -4180,6 +4454,12 @@
   });
 
   window.addEventListener("resize", keepTabOverlayOnscreen);
+
+  window.addEventListener("keydown", (event) => {
+    if (cropModeNoteId && event.key === "Escape") {
+      exitCropMode();
+    }
+  });
 
   window.addEventListener("beforeunload", () => {
     window.clearTimeout(noteSaveTimer);
