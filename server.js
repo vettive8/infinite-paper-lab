@@ -365,6 +365,24 @@ async function handleApi(req, res, pathname) {
     return saveBoard(req, res);
   }
 
+  // POST /api/import  -> create a new board from raw Infinite Paper markdown
+  if (pathname === "/api/import" && req.method === "POST") {
+    try {
+      const board = parseBoard((await readBody(req)).toString("utf8"));
+      const now = Date.now();
+      board.id = crypto.randomUUID(); // a fresh id so it never collides
+      board.createdAt = now;
+      board.updatedAt = now;
+      board.lastOpenedAt = now;
+      const file = fileForBoard(board);
+      await fsp.writeFile(file, serializeBoard(board), "utf8");
+      boardFiles.set(board.id, file);
+      return sendJson(res, 200, { board });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
   const boardMatch = pathname.match(/^\/api\/boards\/([^/]+)$/);
   if (boardMatch) {
     const id = decodeURIComponent(boardMatch[1]);

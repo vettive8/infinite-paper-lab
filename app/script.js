@@ -3809,6 +3809,89 @@
     showPasteStatus("Image cropped");
   }
 
+  // --- import a dropped markdown file -----------------------------------
+
+  function looksLikeBoard(text) {
+    return /<!--\s*ip-note\b/.test(text);
+  }
+
+  async function importBoardFile(text) {
+    let board;
+    try {
+      const data = await apiJson("/api/import", {
+        method: "POST",
+        headers: { "Content-Type": "text/markdown" },
+        body: text,
+      });
+      board = data?.board;
+    } catch {
+      showPasteStatus("Board import failed", true);
+      return;
+    }
+    if (!board || !board.id) {
+      return;
+    }
+    boards.push(normalizeBoardRecord(board, boards.length));
+    renumberBoards();
+    saveBoardsIndex();
+    await switchBoard(board.id);
+    showPasteStatus(`Imported board: ${board.title}`);
+  }
+
+  function importPlainMarkdown(text, point) {
+    const note = {
+      id: makeId(),
+      type: "text",
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+      text,
+    };
+    notes.push(note);
+    paper.appendChild(createNoteElement(note));
+    setSelectedNotes([note.id]);
+    pushUndoAction({ type: "add", ids: [note.id] });
+    saveNotesNow();
+    showPasteStatus("Imported markdown as a note");
+  }
+
+  function handleFileDragOver(event) {
+    if (Array.from(event.dataTransfer?.types || []).includes("Files")) {
+      event.preventDefault(); // allow the drop
+    }
+  }
+
+  async function handleFileDrop(event) {
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (!files.length) {
+      return;
+    }
+    event.preventDefault(); // don't let the browser open the dropped file
+    const markdownFiles = files.filter(
+      (file) =>
+        file.name.toLowerCase().endsWith(".md") ||
+        file.type === "text/markdown"
+    );
+    if (!markdownFiles.length) {
+      return;
+    }
+    const point = viewportToWorld(event.clientX, event.clientY);
+    for (const file of markdownFiles) {
+      let text = "";
+      try {
+        text = await file.text();
+      } catch {
+        continue;
+      }
+      // An Infinite Paper board file becomes a new board; any other
+      // markdown file drops in as a single text note.
+      if (looksLikeBoard(text)) {
+        await importBoardFile(text);
+      } else {
+        importPlainMarkdown(text, point);
+      }
+    }
+  }
+
   async function deleteSelectedNotes() {
     if (!selectedNoteIds.size || undoInProgress) {
       return;
@@ -4164,6 +4247,8 @@
 
   document.addEventListener("beforeinput", handleBeforeInput, true);
   document.addEventListener("paste", handlePaste, true);
+  document.addEventListener("dragover", handleFileDragOver);
+  document.addEventListener("drop", handleFileDrop);
 
   findBar.addEventListener("pointerdown", (event) => {
     event.stopPropagation();

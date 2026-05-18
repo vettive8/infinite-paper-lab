@@ -226,4 +226,63 @@ export async function run({ page, step, expect, config }) {
       `crop not applied in the .md (crop=${cropMatch ? cropMatch[1] : "none"})`
     );
   });
+
+  await step("dropping an Infinite Paper .md file imports it as a board", async () => {
+    const boardMd = [
+      "---",
+      "id: dropped-source-id",
+      'title: "Dropped Board"',
+      "pinned: false",
+      "order: 0",
+      "createdAt: 1",
+      "updatedAt: 1",
+      "lastOpenedAt: 1",
+      "revision: 1",
+      "view:",
+      "  x: 0",
+      "  y: 0",
+      "  scale: 1",
+      "---",
+      "",
+      "# Dropped Board",
+      "",
+      "<!-- ip-note id=dropnote1 type=text x=40 y=40 -->",
+      "imported note from a dropped file",
+      "<!-- /ip-note -->",
+      "",
+    ].join("\n");
+    const before = boardFiles().length;
+
+    await page.evaluate((md) => {
+      const file = new File([md], "dropped-board.md", { type: "text/markdown" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const target = document.getElementById("viewport") || document.body;
+      for (const type of ["dragenter", "dragover", "drop"]) {
+        target.dispatchEvent(
+          new DragEvent(type, {
+            dataTransfer: dt,
+            bubbles: true,
+            cancelable: true,
+            clientX: 700,
+            clientY: 400,
+          })
+        );
+      }
+    }, boardMd);
+
+    await waitFor(
+      () => boardFiles().length > before,
+      6000,
+      "a new board file from the dropped import"
+    );
+    await waitFor(
+      async () =>
+        (await page.locator(".note").allInnerTexts()).some((t) =>
+          t.includes("imported note from a dropped file")
+        ),
+      6000,
+      "the imported board to open with its note on the canvas"
+    );
+  });
 }
