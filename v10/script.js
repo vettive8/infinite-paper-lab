@@ -653,6 +653,35 @@
     hint.textContent = "Shift+Tab toggles";
     top.appendChild(title);
     top.appendChild(hint);
+
+    const historyActions = document.createElement("div");
+    historyActions.className = "board-history-actions";
+
+    const undoButton = document.createElement("button");
+    undoButton.type = "button";
+    undoButton.className = "board-history-button";
+    undoButton.dataset.action = "undo";
+    undoButton.textContent = "↶";
+    undoButton.title = "Undo (Ctrl+Z)";
+    undoButton.setAttribute("aria-label", "Undo");
+    undoButton.addEventListener("click", () => {
+      undoLastAction();
+    });
+    historyActions.appendChild(undoButton);
+
+    const redoButton = document.createElement("button");
+    redoButton.type = "button";
+    redoButton.className = "board-history-button";
+    redoButton.dataset.action = "redo";
+    redoButton.textContent = "↷";
+    redoButton.title = "Redo (Ctrl+Y)";
+    redoButton.setAttribute("aria-label", "Redo");
+    redoButton.addEventListener("click", () => {
+      redoLastAction();
+    });
+    historyActions.appendChild(redoButton);
+
+    top.appendChild(historyActions);
     boardOverlay.appendChild(top);
 
     const side = document.createElement("aside");
@@ -730,6 +759,22 @@
     }
     side.appendChild(list);
     boardOverlay.appendChild(side);
+    syncBoardOverlayUndoRedoControls();
+  }
+
+  function syncBoardOverlayUndoRedoControls() {
+    if (!boardOverlay) {
+      return;
+    }
+
+    const undoButton = boardOverlay.querySelector("[data-action='undo']");
+    const redoButton = boardOverlay.querySelector("[data-action='redo']");
+    if (undoButton) {
+      undoButton.disabled = undoInProgress || !undoStack.length;
+    }
+    if (redoButton) {
+      redoButton.disabled = undoInProgress || !redoStack.length;
+    }
   }
 
   function startBoardRename(boardId) {
@@ -1649,9 +1694,7 @@
   }
 
   function trimActionStack(stack) {
-    if (stack.length > 20) {
-      stack.shift();
-    }
+    return stack;
   }
 
   function pushUndoAction(action, options = {}) {
@@ -1660,11 +1703,13 @@
     if (options.clearRedo !== false) {
       redoStack = [];
     }
+    syncBoardOverlayUndoRedoControls();
   }
 
   function pushRedoAction(action) {
     redoStack.push(action);
     trimActionStack(redoStack);
+    syncBoardOverlayUndoRedoControls();
   }
 
   function removeIdsFromAddActions(stack, idSet) {
@@ -1687,6 +1732,7 @@
     const idSet = new Set(ids);
     undoStack = removeIdsFromAddActions(undoStack, idSet);
     redoStack = removeIdsFromAddActions(redoStack, idSet);
+    syncBoardOverlayUndoRedoControls();
 
     for (const id of idSet) {
       textAddUndoIds.delete(id);
@@ -3125,6 +3171,7 @@
     }
 
     undoInProgress = true;
+    syncBoardOverlayUndoRedoControls();
     try {
       syncNotesFromDom();
       const action = undoStack.pop();
@@ -3175,6 +3222,7 @@
       }
     } finally {
       undoInProgress = false;
+      syncBoardOverlayUndoRedoControls();
     }
 
     return false;
@@ -3186,6 +3234,7 @@
     }
 
     undoInProgress = true;
+    syncBoardOverlayUndoRedoControls();
     try {
       syncNotesFromDom();
       const action = redoStack.pop();
@@ -3233,6 +3282,7 @@
       }
     } finally {
       undoInProgress = false;
+      syncBoardOverlayUndoRedoControls();
     }
 
     return false;

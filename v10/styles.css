@@ -270,6 +270,38 @@ body {
   font-size: 12px;
 }
 
+.board-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.board-history-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  border: 1px solid #3b526f;
+  border-radius: 5px;
+  background: transparent;
+  color: #9ec2ff;
+  cursor: pointer;
+  font: 18px/1 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.board-history-button:disabled {
+  border-color: #343434;
+  color: #5f6468;
+  cursor: default;
+}
+
+.board-history-button:not(:disabled):hover,
+.board-history-button:not(:disabled):focus-visible {
+  background: #272b2d;
+  outline: 0;
+}
+
 .board-overlay-side {
   position: fixed;
   top: 42px;
