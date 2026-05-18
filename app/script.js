@@ -1711,6 +1711,8 @@
     rotateHandle.type = "button";
     rotateHandle.className = "image-control image-rotate-control";
     rotateHandle.title = "Drag to rotate";
+    rotateHandle.textContent = "↻"; // curved rotation arrow
+    rotateHandle.setAttribute("aria-label", "Rotate image");
     rotateHandle.addEventListener("pointerdown", (event) => {
       startImageTransform(event, noteId, "rotate");
     });
