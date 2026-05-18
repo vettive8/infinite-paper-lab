@@ -872,16 +872,15 @@
     });
   }
 
-  // Drag-to-reorder for the board list. A board can only be moved within
-  // its own group — pinned boards stay pinned, unpinned stay unpinned.
+  // Pressing a board row opens it; press-and-drag (or press-and-hold) lifts
+  // the row so it can be reordered within its group — pinned boards stay
+  // pinned, unpinned stay unpinned.
   let boardDrag = null;
 
-  function startBoardDrag(event, boardId) {
+  function startBoardPress(event, boardId) {
     if (event.button !== 0) {
       return;
     }
-    event.preventDefault();
-    event.stopPropagation();
     const list = boardOverlay?.querySelector(".board-list");
     const row = list?.querySelector(
       `.board-row[data-board-id="${CSS.escape(boardId)}"]`
@@ -889,31 +888,57 @@
     if (!list || !row) {
       return;
     }
-    const handle = event.currentTarget;
+    const target = event.currentTarget;
     boardDrag = {
+      boardId,
       list,
       row,
-      handle,
+      target,
       pinned: row.dataset.pinned === "true",
       pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      holdTimer: window.setTimeout(beginBoardDrag, 300),
     };
-    row.classList.add("is-dragging");
-    handle.setPointerCapture(event.pointerId);
-    handle.addEventListener("pointermove", onBoardDragMove);
-    handle.addEventListener("pointerup", endBoardDrag);
-    handle.addEventListener("pointercancel", endBoardDrag);
+    target.setPointerCapture(event.pointerId);
+    target.addEventListener("pointermove", onBoardPressMove);
+    target.addEventListener("pointerup", endBoardPress);
+    target.addEventListener("pointercancel", endBoardPress);
   }
 
-  function onBoardDragMove(event) {
+  // Promote the press into a drag: lift the row.
+  function beginBoardDrag() {
+    if (!boardDrag || boardDrag.dragging) {
+      return;
+    }
+    boardDrag.dragging = true;
+    window.clearTimeout(boardDrag.holdTimer);
+    clearTimeout(boardClickTimer); // cancel any pending board switch
+    boardDrag.row.classList.add("is-dragging");
+  }
+
+  function onBoardPressMove(event) {
     if (!boardDrag) {
       return;
     }
+    if (!boardDrag.dragging) {
+      const moved = Math.hypot(
+        event.clientX - boardDrag.startX,
+        event.clientY - boardDrag.startY
+      );
+      if (moved <= 6) {
+        return; // still within click tolerance
+      }
+      beginBoardDrag();
+    }
+
     const { list, row, pinned } = boardDrag;
     const peers = Array.from(list.querySelectorAll(".board-row")).filter(
       (other) => other !== row && other.dataset.pinned === String(pinned)
     );
     if (!peers.length) {
-      return; // nothing else in this group to reorder against
+      return;
     }
     let reference = null;
     for (const other of peers) {
@@ -923,7 +948,7 @@
         break;
       }
     }
-    if (!reference && peers.length) {
+    if (!reference) {
       reference = peers[peers.length - 1].nextSibling;
     }
     if (reference !== row) {
@@ -931,26 +956,31 @@
     }
   }
 
-  function endBoardDrag(event) {
+  function endBoardPress(event) {
     if (!boardDrag) {
       return;
     }
-    const { list, row, handle, pointerId } = boardDrag;
-    handle.releasePointerCapture?.(pointerId);
-    handle.removeEventListener("pointermove", onBoardDragMove);
-    handle.removeEventListener("pointerup", endBoardDrag);
-    handle.removeEventListener("pointercancel", endBoardDrag);
-    row.classList.remove("is-dragging");
+    const { target, pointerId, row, list, dragging, boardId } = boardDrag;
+    window.clearTimeout(boardDrag.holdTimer);
+    target.releasePointerCapture?.(pointerId);
+    target.removeEventListener("pointermove", onBoardPressMove);
+    target.removeEventListener("pointerup", endBoardPress);
+    target.removeEventListener("pointercancel", endBoardPress);
     boardDrag = null;
 
-    Array.from(list.querySelectorAll(".board-row")).forEach((item, index) => {
-      const board = boards.find((entry) => entry.id === item.dataset.boardId);
-      if (board) {
-        board.order = index;
-      }
-    });
-    saveBoardsIndex();
-    renderBoardOverlay();
+    if (dragging) {
+      row.classList.remove("is-dragging");
+      Array.from(list.querySelectorAll(".board-row")).forEach((item, index) => {
+        const board = boards.find((entry) => entry.id === item.dataset.boardId);
+        if (board) {
+          board.order = index;
+        }
+      });
+      saveBoardsIndex();
+      renderBoardOverlay();
+    } else if (event.type === "pointerup") {
+      scheduleBoardSwitch(boardId); // a plain press opens the board
+    }
   }
 
   function getBoardOverlay() {
@@ -1035,17 +1065,6 @@
       row.dataset.pinned = board.pinned ? "true" : "false";
       row.classList.toggle("is-current", board.id === currentBoardId);
 
-      const grip = document.createElement("button");
-      grip.type = "button";
-      grip.className = "board-drag-handle";
-      grip.textContent = "⠿";
-      grip.title = "Drag to reorder";
-      grip.setAttribute("aria-label", "Drag to reorder board");
-      grip.addEventListener("pointerdown", (event) =>
-        startBoardDrag(event, board.id)
-      );
-      row.appendChild(grip);
-
       if (renamingBoardId === board.id) {
         const renameForm = document.createElement("form");
         renameForm.className = "board-rename-form";
@@ -1074,7 +1093,9 @@
         const select = document.createElement("button");
         select.type = "button";
         select.className = "board-select";
-        select.addEventListener("click", () => scheduleBoardSwitch(board.id));
+        select.addEventListener("pointerdown", (event) =>
+          startBoardPress(event, board.id)
+        );
         select.addEventListener("dblclick", (event) => {
           event.preventDefault();
           event.stopPropagation();

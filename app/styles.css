@@ -345,10 +345,11 @@ body {
 
 .board-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   border-radius: 6px;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
 .board-row.is-current {
@@ -356,22 +357,15 @@ body {
 }
 
 .board-row.is-dragging {
-  opacity: 0.55;
+  position: relative;
+  z-index: 5;
+  transform: scale(1.03);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 45%);
+  background: #20262b;
+  cursor: grabbing;
 }
 
-.board-drag-handle {
-  height: 34px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: #8b939c;
-  font-size: 13px;
-  line-height: 1;
-  cursor: grab;
-  touch-action: none;
-}
-
-.board-drag-handle:active {
+.board-row.is-dragging .board-select {
   cursor: grabbing;
 }
 
