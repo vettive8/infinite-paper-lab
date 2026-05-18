@@ -22,7 +22,8 @@ export const config = {
   cwd: ".",
   url: `http://127.0.0.1:${PORT}`,
   env: { PORT: String(PORT), NOTES_DIR: TEST_NOTES },
-  slowMo: 200,
+  slowMo: 380, // slow enough to watch each action live
+  stepPauseMs: 1100, // pause after each step so the result is visible
   readyTimeoutMs: 20000,
 };
 
@@ -65,7 +66,7 @@ export async function run({ page, step, expect, config }) {
 
   await step("clicking the canvas creates a text note", async () => {
     await page.mouse.click(640, 430);
-    await page.keyboard.type("smoke test note alpha");
+    await page.keyboard.type("smoke test note alpha", { delay: 45 });
     await page.waitForTimeout(300);
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
@@ -116,7 +117,7 @@ export async function run({ page, step, expect, config }) {
         document.activeElement?.classList?.contains("board-rename-input") || false
     );
     expect(focused, "the rename input did not receive focus");
-    await page.keyboard.type("Second Board");
+    await page.keyboard.type("Second Board", { delay: 45 });
     await page.keyboard.press("Enter");
     await page.waitForTimeout(400);
     expect(
