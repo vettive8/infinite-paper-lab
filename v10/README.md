@@ -9,6 +9,7 @@ New in this version:
 - `Tab` toggles the small quick overlay; drag it to move it.
 - Turning Redlines back on immediately rescans notes and catches fuzzy misspellings like `betyetew` -> `better`.
 - `Shift` + `Tab` toggles the left/top board history overlay.
+- The `Tab` quick overlay and `Shift` + `Tab` board overlay can stay open at the same time.
 - The board overlay shows recent boards, pinned boards, and the current board.
 - Use `+ New board` to create and switch to a blank board.
 - Use `Pin` / `Pinned` to pin or unpin boards.

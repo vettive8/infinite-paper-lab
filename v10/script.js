@@ -770,7 +770,6 @@
 
   function openBoardOverlay() {
     hideSpellingBubble();
-    closeTabOverlay();
     const overlay = getBoardOverlay();
     renderBoardOverlay();
     overlay.hidden = false;
