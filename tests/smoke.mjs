@@ -1,0 +1,153 @@
+/**
+ * tests/smoke.mjs — Infinite Paper smoke test.
+ *
+ * Run via the app-test skill:  node <skill>/runner.mjs <thisRepo>
+ *
+ * The app-test runner supplies the Playwright `page`; this file has no
+ * dependencies. It launches the server on a spare port against a throwaway
+ * notes directory, so it never touches the real InfinitePaper-Notes data.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const TEST_NOTES = path.join(here, ".tmp-notes");
+const BOARDS_DIR = path.join(TEST_NOTES, "boards");
+const PORT = 4399;
+
+export const config = {
+  start: "node server.js",
+  cwd: ".",
+  url: `http://127.0.0.1:${PORT}`,
+  env: { PORT: String(PORT), NOTES_DIR: TEST_NOTES },
+  slowMo: 200,
+  readyTimeoutMs: 20000,
+};
+
+export function setup() {
+  fs.rmSync(TEST_NOTES, { recursive: true, force: true });
+}
+
+export function teardown() {
+  fs.rmSync(TEST_NOTES, { recursive: true, force: true });
+}
+
+async function waitFor(condition, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+function boardFiles() {
+  if (!fs.existsSync(BOARDS_DIR)) return [];
+  return fs.readdirSync(BOARDS_DIR).map((f) => path.join(BOARDS_DIR, f));
+}
+
+function fileWithNote(text) {
+  return boardFiles().find((f) => fs.readFileSync(f, "utf8").includes(text));
+}
+
+export async function run({ page, step, expect, config }) {
+  await step("app loads and the server seeds a board file", async () => {
+    await page.goto(config.url);
+    await page.waitForSelector("#paper");
+    expect(
+      (await page.locator(".server-error").count()) === 0,
+      "a 'cannot reach server' message is showing"
+    );
+    await waitFor(() => boardFiles().length >= 1, 8000, "a board .md file on disk");
+  });
+
+  await step("clicking the canvas creates a text note", async () => {
+    await page.mouse.click(640, 430);
+    await page.keyboard.type("smoke test note alpha");
+    await page.waitForTimeout(300);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    const count = await page.locator(".note").count();
+    expect(count >= 1, `expected at least one note, found ${count}`);
+    const text = await page.locator(".note").first().innerText();
+    expect(text.includes("smoke test note alpha"), `note text was: "${text}"`);
+  });
+
+  await step("the note is written into the board .md file", async () => {
+    await waitFor(
+      () => Boolean(fileWithNote("smoke test note alpha")),
+      5000,
+      "the note text to appear in a .md file"
+    );
+    const md = fs.readFileSync(fileWithNote("smoke test note alpha"), "utf8");
+    expect(md.includes("<!-- ip-note"), "the .md file has no note marker");
+  });
+
+  await step("editing the .md on disk live-updates the canvas", async () => {
+    const file = fileWithNote("smoke test note alpha");
+    expect(Boolean(file), "could not find the board file holding the note");
+    const md = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, md.replace("smoke test note alpha", "edited on disk beta"));
+    await waitFor(
+      async () =>
+        (await page.locator(".note").first().innerText()).includes("edited on disk beta"),
+      6000,
+      "the canvas to reflect the external edit"
+    );
+  });
+
+  await step("Shift+Tab opens the board overlay", async () => {
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForSelector(".board-overlay:not([hidden])", { timeout: 4000 });
+    expect(
+      (await page.locator(".board-row").count()) >= 1,
+      "the overlay has no board rows"
+    );
+  });
+
+  await step("+ New board opens straight into rename mode", async () => {
+    await page.locator(".board-new-button").click();
+    await page.waitForSelector(".board-rename-input", { timeout: 4000 });
+    const focused = await page.evaluate(
+      () =>
+        document.activeElement?.classList?.contains("board-rename-input") || false
+    );
+    expect(focused, "the rename input did not receive focus");
+    await page.keyboard.type("Second Board");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    expect(
+      (await page.locator(".board-row").count()) >= 2,
+      "the second board was not created"
+    );
+  });
+
+  await step("dragging a board reorders the list", async () => {
+    const order = () =>
+      page
+        .locator(".board-row")
+        .evaluateAll((els) => els.map((e) => e.dataset.boardId));
+    const before = await order();
+    expect(before.length >= 2, "need two or more boards to reorder");
+    const box = await page
+      .locator(".board-row")
+      .first()
+      .locator(".board-select")
+      .boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 2.2, {
+      steps: 14,
+    });
+    await page.mouse.up();
+    await page.waitForTimeout(700);
+    const after = await order();
+    expect(
+      JSON.stringify(after) !== JSON.stringify(before),
+      `board order did not change (${before} -> ${after})`
+    );
+  });
+}

@@ -548,7 +548,9 @@
   }
 
   function renderBoardOverlayIfVisible() {
-    if (boardOverlay && !boardOverlay.hidden) {
+    // Skip background re-renders while a rename is in progress — rebuilding
+    // the list would blur (and so cancel) the rename input.
+    if (boardOverlay && !boardOverlay.hidden && !renamingBoardId) {
       renderBoardOverlay();
     }
   }
@@ -1360,6 +1362,7 @@
       view: { ...view },
       notes: [],
     });
+    saveBoardsIndex(); // persist the renumbered order of the other boards too
     loadTabTitle();
     applyView();
     renderNotes();
