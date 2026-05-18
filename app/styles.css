@@ -609,3 +609,17 @@ body {
 .note *::selection {
   background: #cfe3ff;
 }
+
+.server-error {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #8a4b2d;
+  background: #fff;
+}

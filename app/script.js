@@ -130,85 +130,116 @@
     );
   }
 
-  function saveBoardsIndex() {
-    localStorage.setItem(
-      boardsStorageKey,
-      JSON.stringify({
-        version: 1,
-        currentBoardId,
-        boards,
-      })
-    );
+  // --- server-backed storage (v11-md) ---------------------------------
+  //
+  // Boards are .md files on disk, behind the local server's API (see
+  // server.js and FORMAT.md). The in-memory model (boards / notes /
+  // view) is unchanged; only loading and persistence move to the server.
+
+  const apiBase = "";
+  let storageReady = false;
+
+  async function apiJson(pathName, options) {
+    const response = await fetch(apiBase + pathName, options);
+    if (!response.ok) {
+      throw new Error(
+        `${options?.method || "GET"} ${pathName} -> ${response.status}`
+      );
+    }
+    return response.json();
   }
 
-  function readSavedBoardState(boardId) {
-    try {
-      return JSON.parse(localStorage.getItem(getBoardStorageKey(boardId)) || "null");
-    } catch {
-      return null;
-    }
+  function putBoard(payload) {
+    return fetch(`${apiBase}/api/boards/${encodeURIComponent(payload.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ board: payload }),
+      keepalive: true,
+    });
   }
 
-  function writeSavedBoardState(boardId, state) {
-    localStorage.setItem(getBoardStorageKey(boardId), JSON.stringify(state));
-  }
+  // Per-board write queue: merges rapid saves and never overlaps two PUTs
+  // for the same board. Partial payloads merge here and again on the
+  // server, so a notes save and a metadata save never clobber each other.
+  const boardWriteQueue = new Map();
+  const boardWriteActive = new Set();
 
-  function seedV10BoardsIfNeeded() {
-    const board = createBoardRecord("Main board");
-    currentBoardId = board.id;
-    boards = [board];
-
-    let sourceBoard = null;
-    try {
-      sourceBoard =
-        JSON.parse(localStorage.getItem(legacyV811BoardStorageKey) || "null") ||
-        JSON.parse(localStorage.getItem(legacyBoardStorageKey) || "null");
-    } catch {
-      sourceBoard = null;
-    }
-
-    const importedNotes = normalizeNotes(sourceBoard?.notes);
-    if (importedNotes.length) {
-      board.title = "Imported v8.1.1";
-      writeSavedBoardState(board.id, {
-        version: 1,
-        revision: Date.now(),
-        origin: clientId,
-        migratedFrom: "v8.1.1",
-        notes: cleanNotes(importedNotes),
-      });
-    }
-
-    saveBoardsIndex();
-  }
-
-  function loadBoardsIndex() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(boardsStorageKey) || "null");
-      boards = Array.isArray(saved?.boards)
-        ? saved.boards.map(normalizeBoardRecord).filter(Boolean)
-        : [];
-      currentBoardId = typeof saved?.currentBoardId === "string" ? saved.currentBoardId : "";
-    } catch {
-      boards = [];
-      currentBoardId = "";
-    }
-
-    if (!boards.length) {
-      seedV10BoardsIfNeeded();
+  function queueBoardWrite(payload) {
+    if (!payload || !payload.id) {
       return;
     }
-
-    if (!boards.some((board) => board.id === currentBoardId)) {
-      currentBoardId = boards[0].id;
-    }
-    saveBoardsIndex();
+    const merged = { ...(boardWriteQueue.get(payload.id) || {}), ...payload };
+    boardWriteQueue.set(payload.id, merged);
+    flushBoardWrites(payload.id);
   }
 
-  function loadCurrentBoardView() {
+  async function flushBoardWrites(boardId) {
+    if (boardWriteActive.has(boardId)) {
+      return;
+    }
+    boardWriteActive.add(boardId);
     try {
-      const savedView = JSON.parse(sessionStorage.getItem(getViewStorageKey()) || "{}");
-      if (savedView && Number.isFinite(savedView.x) && Number.isFinite(savedView.y)) {
+      while (boardWriteQueue.has(boardId)) {
+        const payload = boardWriteQueue.get(boardId);
+        boardWriteQueue.delete(boardId);
+        try {
+          await putBoard(payload);
+        } catch (error) {
+          console.error("Infinite Paper: board save failed", error);
+        }
+      }
+    } finally {
+      boardWriteActive.delete(boardId);
+    }
+  }
+
+  function boardMetaPayload(board) {
+    return {
+      id: board.id,
+      title: board.title,
+      pinned: Boolean(board.pinned),
+      createdAt: board.createdAt,
+      updatedAt: board.updatedAt,
+      lastOpenedAt: board.lastOpenedAt,
+    };
+  }
+
+  function saveBoardsIndex() {
+    // Persist every board's metadata. The server skips files that are
+    // byte-identical, so unchanged boards cost nothing.
+    for (const board of boards) {
+      queueBoardWrite(boardMetaPayload(board));
+    }
+  }
+
+  function showServerError(error) {
+    console.error("Infinite Paper: server unavailable", error);
+    paper.innerHTML = "";
+    const message = document.createElement("div");
+    message.className = "server-error";
+    message.textContent =
+      "Can't reach the Infinite Paper server. Start it with start.bat, then reload this page.";
+    paper.appendChild(message);
+  }
+
+  function centeredView() {
+    return {
+      x: Math.round(window.innerWidth / 2),
+      y: Math.round(window.innerHeight / 2),
+      scale: 1,
+    };
+  }
+
+  function loadCurrentBoardView(fallbackView) {
+    try {
+      const savedView = JSON.parse(
+        sessionStorage.getItem(getViewStorageKey()) || "{}"
+      );
+      if (
+        savedView &&
+        Number.isFinite(savedView.x) &&
+        Number.isFinite(savedView.y)
+      ) {
         view = {
           x: savedView.x,
           y: savedView.y,
@@ -217,33 +248,166 @@
         return;
       }
     } catch {
-      // Fall through to the default centered view.
+      // Fall through to the board file's view or the centered default.
     }
 
-    view = {
-      x: Math.round(window.innerWidth / 2),
-      y: Math.round(window.innerHeight / 2),
-      scale: 1,
-    };
+    if (
+      fallbackView &&
+      Number.isFinite(Number(fallbackView.x)) &&
+      Number.isFinite(Number(fallbackView.y))
+    ) {
+      view = {
+        x: Number(fallbackView.x),
+        y: Number(fallbackView.y),
+        scale: clamp(Number(fallbackView.scale) || 1, 0.45, 2.4),
+      };
+      return;
+    }
+
+    view = centeredView();
   }
 
-  function loadState() {
-    loadBoardsIndex();
-
+  async function migrateLegacyBoardsFromLocalStorage() {
+    // One-time rescue of same-origin v10 localStorage boards. Returns the
+    // migrated board records, or [] when there is nothing to migrate.
+    let index = null;
     try {
-      const savedBoard = readSavedBoardState(currentBoardId) || {};
-      const savedNotes = normalizeNotes(savedBoard?.notes);
-
-      notes = savedNotes;
-      boardRevision = Number(savedBoard.revision) || 0;
-      migratedFromLegacy = Boolean(savedBoard.migratedFrom);
+      index = JSON.parse(localStorage.getItem(boardsStorageKey) || "null");
     } catch {
-      notes = [];
-      boardRevision = 0;
-      migratedFromLegacy = false;
+      index = null;
+    }
+    const records = Array.isArray(index?.boards)
+      ? index.boards.map(normalizeBoardRecord).filter(Boolean)
+      : [];
+    if (!records.length) {
+      return [];
     }
 
-    loadCurrentBoardView();
+    for (const record of records) {
+      let state = null;
+      try {
+        state = JSON.parse(
+          localStorage.getItem(getBoardStorageKey(record.id)) || "null"
+        );
+      } catch {
+        state = null;
+      }
+      try {
+        await putBoard({
+          ...boardMetaPayload(record),
+          revision: Number(state?.revision) || 0,
+          notes: cleanNotes(normalizeNotes(state?.notes)),
+        });
+      } catch (error) {
+        console.error("Infinite Paper: board migration failed", error);
+      }
+    }
+    return records;
+  }
+
+  function legacyV811Notes() {
+    try {
+      const source =
+        JSON.parse(localStorage.getItem(legacyV811BoardStorageKey) || "null") ||
+        JSON.parse(localStorage.getItem(legacyBoardStorageKey) || "null");
+      return cleanNotes(normalizeNotes(source?.notes));
+    } catch {
+      return [];
+    }
+  }
+
+  async function seedFirstBoard() {
+    const board = createBoardRecord("Main board");
+    const importedNotes = legacyV811Notes();
+    if (importedNotes.length) {
+      board.title = "Imported v8.1.1";
+    }
+    boards = [board];
+    currentBoardId = board.id;
+    notes = importedNotes;
+    boardRevision = importedNotes.length ? Date.now() : 0;
+    migratedFromLegacy = importedNotes.length > 0;
+    try {
+      await putBoard({
+        ...boardMetaPayload(board),
+        revision: boardRevision,
+        view: centeredView(),
+        notes: importedNotes,
+      });
+    } catch (error) {
+      console.error("Infinite Paper: failed to create first board", error);
+    }
+  }
+
+  function pickCurrentBoardId() {
+    let best = boards[0];
+    for (const board of boards) {
+      if ((board.lastOpenedAt || 0) > (best.lastOpenedAt || 0)) {
+        best = board;
+      }
+    }
+    return best ? best.id : "";
+  }
+
+  async function loadBoardsIndex() {
+    const data = await apiJson("/api/boards");
+    boards = Array.isArray(data?.boards)
+      ? data.boards.map(normalizeBoardRecord).filter(Boolean)
+      : [];
+
+    if (boards.length) {
+      currentBoardId = pickCurrentBoardId();
+      return true;
+    }
+
+    const migrated = await migrateLegacyBoardsFromLocalStorage();
+    if (migrated.length) {
+      boards = migrated;
+      currentBoardId = pickCurrentBoardId();
+      return true;
+    }
+
+    await seedFirstBoard(); // populates boards / notes / currentBoardId
+    return false;
+  }
+
+  async function loadCurrentBoardNotes() {
+    let saved = null;
+    try {
+      const data = await apiJson(
+        `/api/boards/${encodeURIComponent(currentBoardId)}`
+      );
+      saved = data?.board || null;
+    } catch (error) {
+      console.error("Infinite Paper: failed to load board", error);
+    }
+    notes = normalizeNotes(saved?.notes);
+    boardRevision = Number(saved?.revision) || 0;
+    migratedFromLegacy = Boolean(saved?.migratedFrom);
+    loadCurrentBoardView(saved?.view);
+  }
+
+  async function loadState() {
+    let fetchCurrent = true;
+    try {
+      fetchCurrent = await loadBoardsIndex();
+      storageReady = true;
+    } catch (error) {
+      showServerError(error);
+      return false;
+    }
+
+    if (!boards.some((board) => board.id === currentBoardId)) {
+      currentBoardId = boards[0]?.id || "";
+    }
+
+    if (fetchCurrent) {
+      await loadCurrentBoardNotes();
+    } else {
+      // seedFirstBoard already populated notes in memory.
+      loadCurrentBoardView();
+    }
+    return true;
   }
 
   function saveNotesSoon() {
@@ -257,22 +421,33 @@
   }
 
   function saveNotesNow() {
+    if (!storageReady) {
+      return;
+    }
     syncNotesFromDom();
+    const revision = nextRevision();
+    const cleaned = cleanNotes(notes);
     const state = {
       version: 1,
       boardId: currentBoardId,
-      revision: nextRevision(),
+      revision,
       origin: clientId,
       migratedFrom: migratedFromLegacy ? "v8.1" : undefined,
-      notes: cleanNotes(notes),
+      notes: cleaned,
     };
-    writeSavedBoardState(currentBoardId, state);
+    const payload = {
+      id: currentBoardId,
+      revision,
+      view: { ...view },
+      notes: cleaned,
+    };
     const board = getCurrentBoard();
     if (board) {
       board.updatedAt = Date.now();
-      saveBoardsIndex();
+      Object.assign(payload, boardMetaPayload(board));
       renderBoardOverlayIfVisible();
     }
+    queueBoardWrite(payload);
     syncChannel?.postMessage({ type: "board-updated", state });
     dirtyNoteIds.clear();
   }
@@ -856,7 +1031,7 @@
     }
   }
 
-  function switchBoard(boardId) {
+  async function switchBoard(boardId) {
     if (!boards.some((board) => board.id === boardId)) {
       return;
     }
@@ -879,7 +1054,7 @@
     for (const element of paper.querySelectorAll(".image-note")) {
       releaseImageElement(element);
     }
-    loadState();
+    await loadCurrentBoardNotes();
     loadTabTitle();
     applyView();
     renderNotes();
@@ -896,14 +1071,6 @@
     const board = createBoardRecord(`Board ${boards.length + 1}`);
     boards.push(board);
     currentBoardId = board.id;
-    writeSavedBoardState(board.id, {
-      version: 1,
-      boardId: board.id,
-      revision: Date.now(),
-      origin: clientId,
-      notes: [],
-    });
-    saveBoardsIndex();
     notes = [];
     boardRevision = 0;
     migratedFromLegacy = false;
@@ -912,6 +1079,12 @@
     redoStack = [];
     textAddUndoIds.clear();
     loadCurrentBoardView();
+    queueBoardWrite({
+      ...boardMetaPayload(board),
+      revision: 0,
+      view: { ...view },
+      notes: [],
+    });
     loadTabTitle();
     applyView();
     renderNotes();
@@ -3737,8 +3910,13 @@
     syncChannel?.close();
   });
 
-  loadTabTitle();
-  loadState();
-  applyView();
-  renderNotes();
+  void (async function startInfinitePaper() {
+    const ready = await loadState();
+    if (!ready) {
+      return;
+    }
+    loadTabTitle();
+    applyView();
+    renderNotes();
+  })();
 })();

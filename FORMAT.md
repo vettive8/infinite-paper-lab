@@ -47,8 +47,8 @@ view:
 I need to organize my notes.
 <!-- /ip-note -->
 
-<!-- ip-note id=n2 type=image x=900 y=520 width=500 height=260 rotation=0 flipX=false flipY=false src=attachments/img-3f9a2b1c.png mimeType=image/png -->
-![](attachments/img-3f9a2b1c.png)
+<!-- ip-note id=n2 type=image x=900 y=520 width=500 height=260 rotation=0 flipX=false flipY=false imageId=3f9a2b1c mimeType=image/png -->
+
 <!-- /ip-note -->
 ```
 
@@ -72,8 +72,14 @@ code blocks) round-trips untouched.
 - **Text note** — marker fields: `id`, `type=text`, `x`, `y`. Body: the
   note text.
 - **Image note** — marker fields: `id`, `type=image`, `x`, `y`, `width`,
-  `height`, `rotation`, `flipX`, `flipY`, `src`, `mimeType`. Body: a
-  standard `![](src)` image link so the file previews correctly.
+  `height`, `rotation`, `flipX`, `flipY`, `imageId`, `mimeType`. Body is
+  empty for now.
+
+> Image *bytes* still live in the browser's `IndexedDB` (keyed by
+> `imageId`) in this phase — only board structure and text notes are
+> file-backed yet. A follow-up moves images to real files in
+> `attachments/`, at which point image notes gain a `src` path and a
+> `![](src)` body so they preview correctly.
 
 ### Known limitation
 

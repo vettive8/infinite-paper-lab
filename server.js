@@ -100,11 +100,11 @@ function serializeBoard(board) {
         `rotation=${Number(note.rotation) || 0}`,
         `flipX=${note.flipX ? "true" : "false"}`,
         `flipY=${note.flipY ? "true" : "false"}`,
-        `src=${note.src || ""}`,
+        `imageId=${note.imageId || ""}`,
         `mimeType=${note.mimeType || "image/png"}`,
       ].join(" ");
       lines.push(`<!-- ip-note ${attrs} -->`);
-      lines.push(`![](${note.src || ""})`);
+      lines.push("");
       lines.push("<!-- /ip-note -->", "");
     } else {
       const attrs = [
@@ -185,7 +185,7 @@ function parseBoard(text) {
         rotation: Number(attrs.rotation) || 0,
         flipX: attrs.flipX === "true",
         flipY: attrs.flipY === "true",
-        src: attrs.src || "",
+        imageId: attrs.imageId || "",
         mimeType: attrs.mimeType || "image/png",
       });
     } else {
@@ -407,6 +407,33 @@ async function handleApi(req, res, pathname) {
   return sendJson(res, 404, { error: "unknown endpoint" });
 }
 
+/** Merge an incoming (possibly partial) board over what is on disk. */
+function mergeBoard(base, incoming) {
+  const fallback = base || {
+    id: incoming.id,
+    title: "Untitled board",
+    pinned: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    lastOpenedAt: Date.now(),
+    revision: 0,
+    view: { x: 0, y: 0, scale: 1 },
+    notes: [],
+  };
+  const pick = (key) => (incoming[key] != null ? incoming[key] : fallback[key]);
+  return {
+    id: incoming.id,
+    title: pick("title"),
+    pinned: pick("pinned"),
+    createdAt: pick("createdAt"),
+    updatedAt: pick("updatedAt"),
+    lastOpenedAt: pick("lastOpenedAt"),
+    revision: pick("revision"),
+    view: pick("view"),
+    notes: pick("notes"),
+  };
+}
+
 async function saveBoard(req, res, idFromPath) {
   let payload;
   try {
@@ -414,23 +441,50 @@ async function saveBoard(req, res, idFromPath) {
   } catch {
     return sendJson(res, 400, { error: "invalid JSON" });
   }
-  const board = payload && payload.board ? payload.board : payload;
-  if (!board || typeof board.id !== "string") {
+  const incoming = payload && payload.board ? payload.board : payload;
+  if (!incoming || typeof incoming.id !== "string") {
     return sendJson(res, 400, { error: "board.id is required" });
   }
-  if (idFromPath && board.id !== idFromPath) {
+  if (idFromPath && incoming.id !== idFromPath) {
     return sendJson(res, 400, { error: "board id mismatch" });
   }
 
   try {
+    const previous = boardFiles.get(incoming.id);
+    let base = null;
+    if (previous) {
+      try {
+        base = parseBoard(await fsp.readFile(previous, "utf8"));
+      } catch {
+        base = null;
+      }
+    }
+    const board = mergeBoard(base, incoming);
     const file = fileForBoard(board);
-    const previous = boardFiles.get(board.id);
+    const content = serializeBoard(board);
+
+    // Idempotent: skip the write (and the mtime/watch churn) when the
+    // file already holds exactly this content.
+    let unchanged = false;
+    if (previous === file) {
+      try {
+        unchanged = (await fsp.readFile(file, "utf8")) === content;
+      } catch {
+        unchanged = false;
+      }
+    }
     if (previous && previous !== file) {
       await fsp.rm(previous, { force: true });
     }
-    await fsp.writeFile(file, serializeBoard(board), "utf8");
+    if (!unchanged) {
+      await fsp.writeFile(file, content, "utf8");
+    }
     boardFiles.set(board.id, file);
-    return sendJson(res, 200, { ok: true, file: path.basename(file) });
+    return sendJson(res, 200, {
+      ok: true,
+      file: path.basename(file),
+      changed: !unchanged,
+    });
   } catch (err) {
     return sendJson(res, 500, { error: err.message });
   }
