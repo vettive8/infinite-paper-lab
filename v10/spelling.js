@@ -112,6 +112,35 @@ api auth backup browser channel channels chrome claude cloudflare codex css data
     return previous[b.length];
   }
 
+  function bigrams(value) {
+    const pairs = [];
+    for (let index = 0; index < value.length - 1; index += 1) {
+      pairs.push(value.slice(index, index + 2));
+    }
+    return pairs;
+  }
+
+  function bigramSimilarity(a, b) {
+    const aPairs = bigrams(a);
+    const bPairs = bigrams(b);
+    if (!aPairs.length || !bPairs.length) {
+      return 0;
+    }
+
+    const used = new Set();
+    let matches = 0;
+    for (const pair of aPairs) {
+      const index = bPairs.findIndex((candidate, candidateIndex) => {
+        return candidate === pair && !used.has(candidateIndex);
+      });
+      if (index !== -1) {
+        used.add(index);
+        matches += 1;
+      }
+    }
+    return (2 * matches) / (aPairs.length + bPairs.length);
+  }
+
   function keepCase(suggestion, original) {
     if (original.toLocaleUpperCase() === original) {
       return suggestion.toLocaleUpperCase();
@@ -146,17 +175,28 @@ api auth backup browser channel channels chrome claude cloudflare codex css data
         return [];
       }
 
-      const maxDistance = word.length <= 5 ? 1 : 2;
+      const maxDistance = word.length <= 5 ? 1 : 3;
       const items = [...suggestionWords, ...personalWords]
         .filter((candidate) => candidate[0] === word[0] && Math.abs(candidate.length - word.length) <= 2)
         .map((candidate) => ({
           candidate,
           distance: levenshtein(word, candidate),
+          similarity: bigramSimilarity(word, candidate),
         }))
-        .filter((item) => item.distance <= maxDistance)
-        .sort((a, b) => a.distance - b.distance || a.candidate.localeCompare(b.candidate));
+        .filter((item) => item.distance <= maxDistance && item.similarity >= 0.42)
+        .sort(
+          (a, b) =>
+            a.distance - b.distance ||
+            b.similarity - a.similarity ||
+            a.candidate.localeCompare(b.candidate)
+        );
 
-      if (!items.length || (items[1] && items[0].distance === items[1].distance)) {
+      if (
+        !items.length ||
+        (items[1] &&
+          items[0].distance === items[1].distance &&
+          items[0].similarity - items[1].similarity < 0.12)
+      ) {
         return [];
       }
 

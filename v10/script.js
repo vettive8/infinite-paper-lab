@@ -381,11 +381,14 @@
     saveRedlinesEnabled();
     syncTabOverlayState();
     if (!redlinesEnabled) {
+      window.clearTimeout(spellHighlightTimer);
       hideSpellingBubble();
       CSS.highlights?.delete("app-spell-error");
       return;
     }
-    refreshSpellHighlightsSoon();
+    hideSpellingBubble();
+    window.clearTimeout(spellHighlightTimer);
+    refreshSpellHighlights();
   }
 
   function loadTabOverlayPosition() {
