@@ -11,6 +11,7 @@ New in this version:
 - The board overlay shows recent boards, pinned boards, and the current board.
 - Use `+ New board` to create and switch to a blank board.
 - Use `Pin` / `Pinned` to pin or unpin boards.
+- Double-click a board name to rename it.
 - Overlay closing is done with the same shortcut that opened it, not `Escape`.
 
 Inherited from `v8.1.1`:

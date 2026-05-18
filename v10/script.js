@@ -59,6 +59,8 @@
   let activeSpelling = null;
   let tabOverlay = null;
   let boardOverlay = null;
+  let renamingBoardId = "";
+  let boardClickTimer = 0;
   let redlinesEnabled = loadRedlinesEnabled();
   let tabTitle = defaultDocumentTitle;
   let view = {
@@ -477,14 +479,46 @@
       row.className = "board-row";
       row.classList.toggle("is-current", board.id === currentBoardId);
 
-      const select = document.createElement("button");
-      select.type = "button";
-      select.className = "board-select";
-      select.addEventListener("click", () => switchBoard(board.id));
-      const name = document.createElement("span");
-      name.textContent = board.title || "Untitled board";
-      select.appendChild(name);
-      row.appendChild(select);
+      if (renamingBoardId === board.id) {
+        const renameForm = document.createElement("form");
+        renameForm.className = "board-rename-form";
+
+        const input = document.createElement("input");
+        input.className = "board-rename-input";
+        input.dataset.renameBoardId = board.id;
+        input.value = board.title || "Untitled board";
+        input.maxLength = 80;
+        input.spellcheck = false;
+        input.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
+        input.addEventListener("blur", () => {
+          finishBoardRename(board.id, input.value);
+        });
+
+        renameForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          finishBoardRename(board.id, input.value);
+        });
+
+        renameForm.appendChild(input);
+        row.appendChild(renameForm);
+      } else {
+        const select = document.createElement("button");
+        select.type = "button";
+        select.className = "board-select";
+        select.addEventListener("click", () => scheduleBoardSwitch(board.id));
+        select.addEventListener("dblclick", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          clearTimeout(boardClickTimer);
+          startBoardRename(board.id);
+        });
+        const name = document.createElement("span");
+        name.textContent = board.title || "Untitled board";
+        select.appendChild(name);
+        row.appendChild(select);
+      }
 
       const pin = document.createElement("button");
       pin.type = "button";
@@ -504,6 +538,52 @@
     boardOverlay.appendChild(side);
   }
 
+  function startBoardRename(boardId) {
+    if (!boards.some((board) => board.id === boardId)) {
+      return;
+    }
+    renamingBoardId = boardId;
+    renderBoardOverlay();
+    window.requestAnimationFrame(() => {
+      const input = boardOverlay?.querySelector(".board-rename-input");
+      input?.focus({ preventScroll: true });
+      input?.select();
+    });
+  }
+
+  function scheduleBoardSwitch(boardId) {
+    clearTimeout(boardClickTimer);
+    boardClickTimer = window.setTimeout(() => {
+      switchBoard(boardId);
+    }, 180);
+  }
+
+  function finishBoardRename(boardId, value) {
+    if (renamingBoardId !== boardId) {
+      return;
+    }
+
+    const board = boards.find((item) => item.id === boardId);
+    if (!board) {
+      renamingBoardId = "";
+      renderBoardOverlay();
+      return;
+    }
+
+    const nextTitle = normalizeTabTitle(value) || board.title || "Untitled board";
+    board.title = nextTitle;
+    board.updatedAt = Date.now();
+    renamingBoardId = "";
+    saveBoardsIndex();
+    sessionStorage.setItem(getTabTitleStorageKey(boardId), nextTitle);
+
+    if (boardId === currentBoardId) {
+      applyTabTitle(nextTitle, { persist: false, updateBoard: false });
+    }
+
+    renderBoardOverlay();
+  }
+
   function openBoardOverlay() {
     hideSpellingBubble();
     closeTabOverlay();
@@ -514,6 +594,8 @@
 
   function closeBoardOverlay() {
     if (boardOverlay) {
+      clearTimeout(boardClickTimer);
+      renamingBoardId = "";
       boardOverlay.hidden = true;
     }
   }
@@ -535,6 +617,8 @@
       return;
     }
 
+    clearTimeout(boardClickTimer);
+    renamingBoardId = "";
     saveNotesNow();
     saveViewNow();
     currentBoardId = boardId;
@@ -561,6 +645,7 @@
   function createAndSwitchBoard() {
     saveNotesNow();
     saveViewNow();
+    renamingBoardId = "";
     const board = createBoardRecord(`Board ${boards.length + 1}`);
     boards.push(board);
     currentBoardId = board.id;

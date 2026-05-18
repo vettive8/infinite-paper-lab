@@ -315,6 +315,26 @@ body {
   white-space: nowrap;
 }
 
+.board-rename-form {
+  min-width: 0;
+}
+
+.board-rename-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #3b526f;
+  border-radius: 5px;
+  background: #111516;
+  color: #f3f3f3;
+  font: inherit;
+}
+
+.board-rename-input:focus {
+  border-color: #6aa7ff;
+  outline: 0;
+}
+
 .board-pin {
   height: 26px;
   padding: 0 8px;
