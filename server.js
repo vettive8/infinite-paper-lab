@@ -74,6 +74,7 @@ function serializeBoard(board) {
     `id: ${board.id}`,
     `title: ${yamlString(board.title || "Untitled board")}`,
     `pinned: ${board.pinned ? "true" : "false"}`,
+    `order: ${Number(board.order) || 0}`,
     `createdAt: ${Number(board.createdAt) || Date.now()}`,
     `updatedAt: ${Number(board.updatedAt) || Date.now()}`,
     `lastOpenedAt: ${Number(board.lastOpenedAt) || Date.now()}`,
@@ -128,6 +129,7 @@ function parseBoard(text) {
     id: "",
     title: "Untitled board",
     pinned: false,
+    order: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     lastOpenedAt: Date.now(),
@@ -159,7 +161,9 @@ function parseBoard(text) {
         board.title = parseYamlString(value);
       } else if (key === "pinned") {
         board.pinned = value === "true";
-      } else if (["createdAt", "updatedAt", "lastOpenedAt", "revision"].includes(key)) {
+      } else if (
+        ["order", "createdAt", "updatedAt", "lastOpenedAt", "revision"].includes(key)
+      ) {
         board[key] = Number(value) || 0;
       }
     }
@@ -323,6 +327,7 @@ async function handleApi(req, res, pathname) {
           id,
           title: board.title,
           pinned: board.pinned,
+          order: board.order,
           createdAt: board.createdAt,
           updatedAt: board.updatedAt,
           lastOpenedAt: board.lastOpenedAt,
@@ -416,6 +421,7 @@ function mergeBoard(base, incoming) {
     id: incoming.id,
     title: "Untitled board",
     pinned: false,
+    order: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     lastOpenedAt: Date.now(),
@@ -428,6 +434,7 @@ function mergeBoard(base, incoming) {
     id: incoming.id,
     title: pick("title"),
     pinned: pick("pinned"),
+    order: pick("order"),
     createdAt: pick("createdAt"),
     updatedAt: pick("updatedAt"),
     lastOpenedAt: pick("lastOpenedAt"),

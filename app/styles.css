@@ -345,7 +345,7 @@ body {
 
 .board-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   border-radius: 6px;
@@ -353,6 +353,26 @@ body {
 
 .board-row.is-current {
   background: rgb(106 167 255 / 15%);
+}
+
+.board-row.is-dragging {
+  opacity: 0.55;
+}
+
+.board-drag-handle {
+  height: 34px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #8b939c;
+  font-size: 13px;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.board-drag-handle:active {
+  cursor: grabbing;
 }
 
 .board-select {

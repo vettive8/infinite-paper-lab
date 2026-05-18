@@ -96,6 +96,7 @@
       id: makeId(),
       title,
       pinned: false,
+      order: 0,
       createdAt: now,
       updatedAt: now,
       lastOpenedAt: now,
@@ -112,6 +113,7 @@
       id: board.id,
       title: normalizeTabTitle(board.title || `Board ${fallbackIndex + 1}`) || `Board ${fallbackIndex + 1}`,
       pinned: Boolean(board.pinned),
+      order: Number.isFinite(Number(board.order)) ? Number(board.order) : fallbackIndex,
       createdAt: Number(board.createdAt) || now,
       updatedAt: Number(board.updatedAt) || now,
       lastOpenedAt: Number(board.lastOpenedAt) || Number(board.updatedAt) || now,
@@ -199,6 +201,7 @@
       id: board.id,
       title: board.title,
       pinned: Boolean(board.pinned),
+      order: Number(board.order) || 0,
       createdAt: board.createdAt,
       updatedAt: board.updatedAt,
       lastOpenedAt: board.lastOpenedAt,
@@ -855,12 +858,99 @@
   }
 
   function sortedBoards() {
-    return [...boards].sort((a, b) => {
-      if (a.pinned !== b.pinned) {
-        return a.pinned ? -1 : 1;
-      }
-      return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
+    const byOrder = (a, b) => (a.order || 0) - (b.order || 0);
+    const pinned = boards.filter((board) => board.pinned).sort(byOrder);
+    const unpinned = boards.filter((board) => !board.pinned).sort(byOrder);
+    return [...pinned, ...unpinned];
+  }
+
+  // Reassign each board's order to its position in the sorted list, so the
+  // numbers stay a clean 0..N-1 after any reorder or pin change.
+  function renumberBoards() {
+    sortedBoards().forEach((board, index) => {
+      board.order = index;
     });
+  }
+
+  // Drag-to-reorder for the board list. A board can only be moved within
+  // its own group — pinned boards stay pinned, unpinned stay unpinned.
+  let boardDrag = null;
+
+  function startBoardDrag(event, boardId) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const list = boardOverlay?.querySelector(".board-list");
+    const row = list?.querySelector(
+      `.board-row[data-board-id="${CSS.escape(boardId)}"]`
+    );
+    if (!list || !row) {
+      return;
+    }
+    const handle = event.currentTarget;
+    boardDrag = {
+      list,
+      row,
+      handle,
+      pinned: row.dataset.pinned === "true",
+      pointerId: event.pointerId,
+    };
+    row.classList.add("is-dragging");
+    handle.setPointerCapture(event.pointerId);
+    handle.addEventListener("pointermove", onBoardDragMove);
+    handle.addEventListener("pointerup", endBoardDrag);
+    handle.addEventListener("pointercancel", endBoardDrag);
+  }
+
+  function onBoardDragMove(event) {
+    if (!boardDrag) {
+      return;
+    }
+    const { list, row, pinned } = boardDrag;
+    const peers = Array.from(list.querySelectorAll(".board-row")).filter(
+      (other) => other !== row && other.dataset.pinned === String(pinned)
+    );
+    if (!peers.length) {
+      return; // nothing else in this group to reorder against
+    }
+    let reference = null;
+    for (const other of peers) {
+      const rect = other.getBoundingClientRect();
+      if (event.clientY < rect.top + rect.height / 2) {
+        reference = other;
+        break;
+      }
+    }
+    if (!reference && peers.length) {
+      reference = peers[peers.length - 1].nextSibling;
+    }
+    if (reference !== row) {
+      list.insertBefore(row, reference);
+    }
+  }
+
+  function endBoardDrag(event) {
+    if (!boardDrag) {
+      return;
+    }
+    const { list, row, handle, pointerId } = boardDrag;
+    handle.releasePointerCapture?.(pointerId);
+    handle.removeEventListener("pointermove", onBoardDragMove);
+    handle.removeEventListener("pointerup", endBoardDrag);
+    handle.removeEventListener("pointercancel", endBoardDrag);
+    row.classList.remove("is-dragging");
+    boardDrag = null;
+
+    Array.from(list.querySelectorAll(".board-row")).forEach((item, index) => {
+      const board = boards.find((entry) => entry.id === item.dataset.boardId);
+      if (board) {
+        board.order = index;
+      }
+    });
+    saveBoardsIndex();
+    renderBoardOverlay();
   }
 
   function getBoardOverlay() {
@@ -881,7 +971,7 @@
   }
 
   function renderBoardOverlay() {
-    if (!boardOverlay) {
+    if (!boardOverlay || boardDrag) {
       return;
     }
 
@@ -942,7 +1032,19 @@
       const row = document.createElement("div");
       row.className = "board-row";
       row.dataset.boardId = board.id;
+      row.dataset.pinned = board.pinned ? "true" : "false";
       row.classList.toggle("is-current", board.id === currentBoardId);
+
+      const grip = document.createElement("button");
+      grip.type = "button";
+      grip.className = "board-drag-handle";
+      grip.textContent = "⠿";
+      grip.title = "Drag to reorder";
+      grip.setAttribute("aria-label", "Drag to reorder board");
+      grip.addEventListener("pointerdown", (event) =>
+        startBoardDrag(event, board.id)
+      );
+      row.appendChild(grip);
 
       if (renamingBoardId === board.id) {
         const renameForm = document.createElement("form");
@@ -1137,6 +1239,8 @@
     renamingBoardId = "";
     const board = createBoardRecord(`Board ${boards.length + 1}`);
     boards.push(board);
+    board.order = -1; // float a new board to the top of the unpinned group
+    renumberBoards();
     currentBoardId = board.id;
     notes = [];
     boardRevision = 0;
@@ -1165,6 +1269,8 @@
     }
     board.pinned = !board.pinned;
     board.updatedAt = Date.now();
+    board.order = boards.length; // drop it at the end of its new group
+    renumberBoards();
     saveBoardsIndex();
     renderBoardOverlay();
   }
