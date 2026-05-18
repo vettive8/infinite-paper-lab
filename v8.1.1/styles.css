@@ -104,7 +104,8 @@ body {
   color: #111;
 }
 
-.find-bar {
+.find-bar,
+.title-bar {
   position: fixed;
   top: 12px;
   right: 12px;
@@ -121,11 +122,18 @@ body {
   user-select: none;
 }
 
-.find-bar[hidden] {
+.title-bar {
+  left: 12px;
+  right: auto;
+}
+
+.find-bar[hidden],
+.title-bar[hidden] {
   display: none;
 }
 
-.find-bar input {
+.find-bar input,
+.title-bar input {
   width: 190px;
   height: 28px;
   padding: 0 8px;
@@ -138,7 +146,12 @@ body {
   letter-spacing: 0;
 }
 
-.find-bar input:focus {
+.title-bar input {
+  width: 230px;
+}
+
+.find-bar input:focus,
+.title-bar input:focus {
   outline-color: #6aa7ff;
 }
 
@@ -149,7 +162,8 @@ body {
   text-align: center;
 }
 
-.find-bar button {
+.find-bar button,
+.title-bar button {
   display: grid;
   place-items: center;
   width: 28px;
@@ -163,7 +177,9 @@ body {
 }
 
 .find-bar button:hover,
-.find-bar button:focus-visible {
+.find-bar button:focus-visible,
+.title-bar button:hover,
+.title-bar button:focus-visible {
   background: #303030;
   color: #fff;
   outline: 0;

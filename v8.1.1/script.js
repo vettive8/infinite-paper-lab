@@ -7,10 +7,15 @@
   const findPrev = document.getElementById("find-prev");
   const findNext = document.getElementById("find-next");
   const findClose = document.getElementById("find-close");
+  const titleBar = document.getElementById("title-bar");
+  const titleInput = document.getElementById("title-input");
+  const titleClose = document.getElementById("title-close");
   const selectionBox = document.getElementById("selection-box");
+  const defaultDocumentTitle = document.title;
   const boardStorageKey = "infinite-paper:v8.1.1:board";
   const legacyBoardStorageKey = "infinite-paper:v8.1:board";
   const viewStorageKey = "infinite-paper:v8.1.1:view";
+  const tabTitleStorageKey = "infinite-paper:v8.1.1:tab-title";
   const syncChannelName = "infinite-paper:v8.1.1:sync";
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
@@ -43,6 +48,7 @@
   let lastImagePasteSignature = "";
   let lastImagePasteAt = 0;
   let pasteStatusTimer = 0;
+  let tabTitle = defaultDocumentTitle;
   let view = {
     x: Math.round(window.innerWidth / 2),
     y: Math.round(window.innerHeight / 2),
@@ -119,6 +125,53 @@
 
   function saveViewNow() {
     sessionStorage.setItem(viewStorageKey, JSON.stringify(view));
+  }
+
+  function normalizeTabTitle(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+  }
+
+  function applyTabTitle(value, options = {}) {
+    const cleanTitle = normalizeTabTitle(value);
+    tabTitle = cleanTitle || defaultDocumentTitle;
+    document.title = tabTitle;
+
+    if (options.persist === false) {
+      return;
+    }
+
+    if (cleanTitle && cleanTitle !== defaultDocumentTitle) {
+      sessionStorage.setItem(tabTitleStorageKey, cleanTitle);
+    } else {
+      sessionStorage.removeItem(tabTitleStorageKey);
+    }
+  }
+
+  function loadTabTitle() {
+    applyTabTitle(sessionStorage.getItem(tabTitleStorageKey), { persist: false });
+  }
+
+  function openTitleRename() {
+    titleBar.hidden = false;
+    titleInput.value = tabTitle;
+    window.requestAnimationFrame(() => {
+      titleInput.focus({ preventScroll: true });
+      titleInput.select();
+    });
+  }
+
+  function closeTitleRename() {
+    titleBar.hidden = true;
+    titleInput.value = "";
+  }
+
+  function saveTitleRename() {
+    applyTabTitle(titleInput.value);
+    closeTitleRename();
+    showPasteStatus(tabTitle === defaultDocumentTitle ? "Tab title reset" : `Tab renamed: ${tabTitle}`);
   }
 
   function nextRevision() {
@@ -2314,6 +2367,24 @@
   findNext.addEventListener("click", () => jumpFind(1));
   findClose.addEventListener("click", closeFind);
 
+  titleBar.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+
+  titleBar.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveTitleRename();
+  });
+
+  titleInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeTitleRename();
+    }
+  });
+
+  titleClose.addEventListener("click", closeTitleRename);
+
   syncChannel?.addEventListener("message", (event) => {
     if (event.data?.type === "board-updated") {
       applyIncomingBoard(event.data.state);
@@ -2353,6 +2424,22 @@
   );
 
   window.addEventListener("keydown", (event) => {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "F2") {
+      event.preventDefault();
+      openTitleRename();
+      return;
+    }
+
+    if (!titleBar.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeTitleRename();
+      return;
+    }
+
+    if (titleBar.contains(document.activeElement)) {
+      return;
+    }
+
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "f") {
       event.preventDefault();
       if (findBar.hidden) {
@@ -2509,6 +2596,7 @@
     syncChannel?.close();
   });
 
+  loadTabTitle();
   loadState();
   applyView();
   renderNotes();
