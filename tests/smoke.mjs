@@ -286,7 +286,7 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
-  await step("dropping a plain .md file also imports it as a board", async () => {
+  await step("a dropped plain .md file imports as a rendered markdown board", async () => {
     const before = boardFiles().length;
     await page.evaluate(() => {
       const file = new File(
@@ -314,13 +314,40 @@ export async function run({ page, step, expect, config }) {
       6000,
       "a new board file from the plain-markdown import"
     );
+    // The imported note is a markdown note, rendered as a document.
     await waitFor(
       async () =>
-        (await page.locator(".note").allInnerTexts()).some((t) =>
-          t.includes("plain markdown body text")
-        ),
+        (await page.locator(".markdown-note .md-body h1").count()) >= 1,
       6000,
-      "the plain markdown to open as a board with its content as a note"
+      "the imported markdown to render an <h1> heading"
+    );
+    const preview = await page
+      .locator(".markdown-note .md-body")
+      .first()
+      .innerText();
+    expect(
+      preview.includes("plain markdown body text"),
+      `rendered body is missing the text: ${preview}`
+    );
+    expect(
+      !preview.includes("# Partner SOW"),
+      "the heading still shows a raw '#' — it did not render"
+    );
+
+    // The Markdown tab flips the note to its raw source.
+    await page
+      .locator(".markdown-note .md-tab")
+      .filter({ hasText: "Markdown" })
+      .first()
+      .click();
+    await page.waitForTimeout(400);
+    const raw = await page
+      .locator(".markdown-note .md-body")
+      .first()
+      .innerText();
+    expect(
+      raw.includes("# Partner SOW"),
+      `the Markdown tab should show the raw source: ${raw}`
     );
   });
 }

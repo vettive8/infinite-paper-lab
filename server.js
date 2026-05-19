@@ -119,7 +119,7 @@ function serializeBoard(board) {
     } else {
       const attrs = [
         `id=${note.id}`,
-        "type=text",
+        `type=${note.type === "markdown" ? "markdown" : "text"}`,
         `x=${Math.round(note.x)}`,
         `y=${Math.round(note.y)}`,
       ].join(" ");
@@ -213,7 +213,7 @@ function parseBoard(text) {
     } else {
       board.notes.push({
         id: attrs.id,
-        type: "text",
+        type: attrs.type === "markdown" ? "markdown" : "text",
         x: Number(attrs.x) || 0,
         y: Number(attrs.y) || 0,
         text: body,
@@ -395,7 +395,7 @@ async function handleApi(req, res, pathname) {
           revision: 1,
           view: { x: 0, y: 0, scale: 1 },
           notes: [
-            { id: crypto.randomUUID(), type: "text", x: 0, y: 0, text: raw },
+            { id: crypto.randomUUID(), type: "markdown", x: 0, y: 0, text: raw },
           ],
         };
       }

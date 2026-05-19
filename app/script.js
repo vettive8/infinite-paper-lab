@@ -1436,7 +1436,12 @@
       )
       .map((note) => ({
         id: note.id,
-        type: note.type === "image" ? "image" : "text",
+        type:
+          note.type === "image"
+            ? "image"
+            : note.type === "markdown"
+            ? "markdown"
+            : "text",
         x: Math.round(Number(note.x)),
         y: Math.round(Number(note.y)),
         text: typeof note.text === "string" ? note.text : "",
@@ -1648,9 +1653,95 @@
     event.stopPropagation();
   }
 
+  function makeMarkdownTab(label, mode) {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "md-tab";
+    tab.dataset.mdMode = mode;
+    tab.textContent = label;
+    tab.addEventListener("pointerdown", (event) => event.stopPropagation());
+    return tab;
+  }
+
+  // Switch a markdown note between the rendered Preview and the raw
+  // Markdown source. Leaving source mode captures whatever was typed.
+  function setMarkdownMode(element, mode) {
+    const note = findNote(element.dataset.id);
+    if (!note) {
+      return;
+    }
+    const body = element.querySelector(".md-body");
+    if (element.dataset.mdMode === "source" && body.isContentEditable) {
+      note.text = getNoteText(body);
+    }
+    element.dataset.mdMode = mode;
+    for (const tab of element.querySelectorAll(".md-tab")) {
+      tab.classList.toggle("is-active", tab.dataset.mdMode === mode);
+    }
+    if (mode === "source") {
+      body.contentEditable = "plaintext-only";
+      body.spellcheck = false;
+      body.textContent = note.text || "";
+    } else {
+      body.contentEditable = "false";
+      body.innerHTML = window.renderInfinitePaperMarkdown
+        ? window.renderInfinitePaperMarkdown(note.text || "")
+        : "";
+    }
+  }
+
+  function createMarkdownElement(note) {
+    const noteId = note.id;
+    const element = document.createElement("div");
+    element.className = "board-item markdown-note";
+    element.dataset.id = noteId;
+    element.dataset.type = "markdown";
+    element.dataset.mdMode = "preview";
+    element.style.left = `${note.x}px`;
+    element.style.top = `${note.y}px`;
+
+    const tabs = document.createElement("div");
+    tabs.className = "md-tabs";
+    const previewTab = makeMarkdownTab("Preview", "preview");
+    const sourceTab = makeMarkdownTab("Markdown", "source");
+    tabs.append(previewTab, sourceTab);
+    // The tab strip doubles as the note's drag handle.
+    tabs.addEventListener("pointerdown", (event) => {
+      handleBoardItemPointerDown(event, noteId);
+    });
+    previewTab.addEventListener("click", () =>
+      setMarkdownMode(element, "preview")
+    );
+    sourceTab.addEventListener("click", () =>
+      setMarkdownMode(element, "source")
+    );
+
+    const body = document.createElement("div");
+    body.className = "md-body";
+    // The body is for content, not dragging — keep clicks off the canvas.
+    body.addEventListener("pointerdown", (event) => event.stopPropagation());
+    body.addEventListener("input", () => {
+      if (!body.isContentEditable) {
+        return;
+      }
+      const currentNote = findNote(noteId);
+      if (currentNote) {
+        currentNote.text = getNoteText(body);
+        saveNotesSoon();
+      }
+    });
+
+    element.append(tabs, body);
+    setMarkdownMode(element, "preview");
+    return element;
+  }
+
   function createNoteElement(note) {
-    if (!isTextNote(note)) {
+    if (note.type === "image") {
       return createImageElement(note);
+    }
+    if (note.type === "markdown") {
+      return createMarkdownElement(note);
     }
 
     const noteId = note.id;
@@ -2406,12 +2497,20 @@
 
   function syncNotesFromDom() {
     for (const note of notes) {
-      if (!isTextNote(note)) {
-        continue;
-      }
-      const element = paper.querySelector(`.note[data-id="${CSS.escape(note.id)}"]`);
-      if (element) {
-        note.text = getNoteText(element);
+      if (isTextNote(note)) {
+        const element = paper.querySelector(
+          `.note[data-id="${CSS.escape(note.id)}"]`
+        );
+        if (element) {
+          note.text = getNoteText(element);
+        }
+      } else if (note.type === "markdown") {
+        const body = paper.querySelector(
+          `.markdown-note[data-id="${CSS.escape(note.id)}"] .md-body`
+        );
+        if (body && body.isContentEditable) {
+          note.text = getNoteText(body);
+        }
       }
     }
   }
@@ -2461,8 +2560,14 @@
       if (isTextNote(note) && element !== protectedElement && getNoteText(element) !== (note.text || "")) {
         element.textContent = note.text || "";
       }
-      if (!isTextNote(note)) {
+      if (note.type === "image") {
         updateImageElement(element, note);
+      }
+      if (note.type === "markdown") {
+        const body = element.querySelector(".md-body");
+        if (body && !body.isContentEditable) {
+          body.innerHTML = window.renderInfinitePaperMarkdown(note.text || "");
+        }
       }
     }
 
