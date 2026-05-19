@@ -153,6 +153,42 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("middle-clicking a board opens it in a new browser tab", async () => {
+    // The board overlay is still open from the drag step.
+    const targetRow = page.locator(".board-row").nth(1);
+    const targetId = await targetRow.getAttribute("data-board-id");
+    expect(Boolean(targetId), "could not read a board id from the overlay");
+
+    const urlBefore = await page.evaluate(() => location.href);
+
+    // Middle button (scroll-wheel) — the web's standard "open in new tab".
+    const popupPromise = page.context().waitForEvent("page", { timeout: 8000 });
+    await targetRow.locator(".board-select").click({ button: "middle" });
+    const popup = await popupPromise;
+    await popup.waitForLoadState("domcontentloaded");
+
+    expect(
+      popup.url().includes(`board=${targetId}`),
+      `new tab opened the wrong URL: ${popup.url()}`
+    );
+    await popup.waitForSelector("#paper", { timeout: 8000 });
+    const popupBoard = await popup.evaluate(() =>
+      new URLSearchParams(location.search).get("board")
+    );
+    expect(
+      popupBoard === targetId,
+      `new tab is on board "${popupBoard}", expected "${targetId}"`
+    );
+    await popup.close();
+
+    // The original tab must not have navigated anywhere.
+    const urlAfter = await page.evaluate(() => location.href);
+    expect(
+      urlAfter === urlBefore,
+      `the original tab navigated (${urlBefore} -> ${urlAfter})`
+    );
+  });
+
   await step("pasting an image creates an image note", async () => {
     await page.keyboard.press("Shift+Tab"); // close the board overlay
     await page.waitForTimeout(300);

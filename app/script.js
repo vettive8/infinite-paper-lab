@@ -343,7 +343,21 @@
     }
   }
 
+  function getRequestedBoardId() {
+    try {
+      return new URLSearchParams(window.location.search).get("board") || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
   function pickCurrentBoardId() {
+    // A ?board=<id> in the URL wins — this is how a deep-linked tab
+    // (middle-clicked from the board overlay) lands on the right board.
+    const requested = getRequestedBoardId();
+    if (requested && boards.some((board) => board.id === requested)) {
+      return requested;
+    }
     let best = boards[0];
     for (const board of boards) {
       if ((board.lastOpenedAt || 0) > (best.lastOpenedAt || 0)) {
@@ -351,6 +365,24 @@
       }
     }
     return best ? best.id : "";
+  }
+
+  // Keep the address bar in step with the board on screen, so a refresh
+  // (or a copied/opened URL) reopens exactly this board.
+  function syncBoardUrl() {
+    if (!currentBoardId) {
+      return;
+    }
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("board") === currentBoardId) {
+        return;
+      }
+      url.searchParams.set("board", currentBoardId);
+      window.history.replaceState(null, "", url);
+    } catch (error) {
+      // A malformed URL is not worth crashing the app over.
+    }
   }
 
   async function loadBoardsIndex() {
@@ -411,6 +443,7 @@
       // seedFirstBoard already populated notes in memory.
       loadCurrentBoardView();
     }
+    syncBoardUrl();
     return true;
   }
 
@@ -915,6 +948,12 @@
   let boardDrag = null;
 
   function startBoardPress(event, boardId) {
+    if (event.button === 1) {
+      // Middle button: suppress the autoscroll glyph. Opening the new tab
+      // is handled by the auxclick listener on the same button.
+      event.preventDefault();
+      return;
+    }
     if (event.button !== 0) {
       return;
     }
@@ -1195,6 +1234,14 @@
         select.addEventListener("pointerdown", (event) =>
           startBoardPress(event, board.id)
         );
+        // Middle button (scroll-wheel click) opens the board in a new tab.
+        select.addEventListener("auxclick", (event) => {
+          if (event.button !== 1) {
+            return;
+          }
+          event.preventDefault();
+          openBoardInNewTab(board.id);
+        });
         select.addEventListener("dblclick", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -1270,6 +1317,23 @@
     }, 180);
   }
 
+  // Middle-click on a board row opens it in a fresh browser tab — the same
+  // gesture that opens any link on the web. The new tab carries a
+  // ?board=<id> so it loads straight into that board.
+  function openBoardInNewTab(boardId) {
+    if (!boards.some((board) => board.id === boardId)) {
+      return;
+    }
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("board", boardId);
+      url.hash = "";
+      window.open(url.toString(), "_blank");
+    } catch (error) {
+      console.error("Infinite Paper: could not open board in a new tab", error);
+    }
+  }
+
   function finishBoardRename(boardId, value) {
     if (renamingBoardId !== boardId) {
       return;
@@ -1333,6 +1397,7 @@
     saveNotesNow();
     saveViewNow();
     currentBoardId = boardId;
+    syncBoardUrl();
 
     const board = getCurrentBoard();
     if (board) {
@@ -1362,6 +1427,7 @@
     board.order = -1; // float a new board to the top of the unpinned group
     renumberBoards();
     currentBoardId = board.id;
+    syncBoardUrl();
     notes = [];
     boardRevision = 0;
     migratedFromLegacy = false;
