@@ -110,17 +110,25 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
-  await step("+ New board opens straight into rename mode", async () => {
+  await step("+ New board opens a new board tab in rename mode", async () => {
+    const popupPromise = page.context().waitForEvent("page", { timeout: 8000 });
     await page.locator(".board-new-button").click();
-    await page.waitForSelector(".board-rename-input", { timeout: 4000 });
-    const focused = await page.evaluate(
+    const popup = await popupPromise;
+    await popup.waitForLoadState("domcontentloaded");
+    await popup.waitForSelector(".board-rename-input", { timeout: 8000 });
+    const focused = await popup.evaluate(
       () =>
         document.activeElement?.classList?.contains("board-rename-input") || false
     );
-    expect(focused, "the rename input did not receive focus");
-    await page.keyboard.type("Second Board", { delay: 45 });
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(400);
+    expect(focused, "the new tab did not open in rename mode");
+    await popup.keyboard.type("Second Board", { delay: 30 });
+    await popup.keyboard.press("Enter");
+    await popup.waitForTimeout(400);
+    await popup.close();
+
+    // The new board lives on the shared server — reload so this page sees it.
+    await page.reload();
+    await page.waitForSelector(".board-overlay:not([hidden])", { timeout: 4000 });
     expect(
       (await page.locator(".board-row").count()) >= 2,
       "the second board was not created"
@@ -405,27 +413,92 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("markdown note: resize persists, body drag moves, click never selects", async () => {
+    const note = page.locator(".markdown-note").first();
+    // Make sure we're on the Preview tab (the import step left it on Markdown).
+    await note.locator(".md-tab").filter({ hasText: "Preview" }).first().click();
+    await page.waitForTimeout(300);
+
+    // --- resize via the bottom-right grip ---
+    const before = await note.boundingBox();
+    const grip = await note.locator(".md-resize-handle").boundingBox();
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + 150, grip.y + 110, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    const resized = await note.boundingBox();
+    expect(
+      resized.width > before.width + 60,
+      `resize did not widen the note (${Math.round(before.width)} -> ${Math.round(
+        resized.width
+      )})`
+    );
+
+    // The new size must reach the .md file.
+    await waitFor(
+      () => {
+        const file = boardFiles().find((f) =>
+          fs.readFileSync(f, "utf8").includes("type=markdown")
+        );
+        return file && /type=markdown[^\n]*width=/.test(fs.readFileSync(file, "utf8"));
+      },
+      5000,
+      "width= to be written into the markdown note's marker"
+    );
+
+    // --- a plain click on the preview body must NOT select the note ---
+    const body = await note.locator(".md-body").boundingBox();
+    await page.mouse.click(body.x + body.width / 2, body.y + 40);
+    await page.waitForTimeout(250);
+    expect(
+      !(await note.evaluate((el) => el.classList.contains("is-selected"))),
+      "clicking the preview body selected the note — it must not"
+    );
+
+    // --- dragging the preview body moves the whole note ---
+    const posBefore = await note.boundingBox();
+    await page.mouse.move(body.x + body.width / 2, body.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(body.x + body.width / 2 + 170, body.y + 150, { steps: 14 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    const posAfter = await note.boundingBox();
+    expect(
+      Math.abs(posAfter.x - posBefore.x) > 60,
+      `dragging the body did not move the note (${Math.round(
+        posBefore.x
+      )} -> ${Math.round(posAfter.x)})`
+    );
+  });
+
   await step("writing several notes keeps each note's text intact", async () => {
-    // Write on a fresh empty board.
-    await page.keyboard.press("Shift+Tab");
-    await page.waitForSelector(".board-overlay:not([hidden])", { timeout: 4000 });
+    // A new board opens in its own tab — do the writing there, on a fresh
+    // empty board.
+    if (!(await page.locator(".board-overlay:not([hidden])").count())) {
+      await page.keyboard.press("Shift+Tab");
+      await page.waitForSelector(".board-overlay:not([hidden])", { timeout: 4000 });
+    }
+    const popupPromise = page.context().waitForEvent("page", { timeout: 8000 });
     await page.locator(".board-new-button").click();
-    await page.waitForSelector(".board-rename-input", { timeout: 4000 });
-    await page.keyboard.type("Writing Test", { delay: 20 });
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Shift+Tab"); // close the overlay
-    await page.waitForTimeout(400);
+    const writePage = await popupPromise;
+    await writePage.waitForLoadState("domcontentloaded");
+    await writePage.waitForSelector(".board-rename-input", { timeout: 8000 });
+    await writePage.keyboard.type("Writing Test", { delay: 20 });
+    await writePage.keyboard.press("Enter");
+    await writePage.keyboard.press("Shift+Tab"); // close the overlay
+    await writePage.waitForTimeout(400);
 
     const texts = ["alpha note one", "bravo note two", "charlie note three"];
     for (let index = 0; index < texts.length; index += 1) {
-      await page.mouse.click(300 + index * 250, 300);
-      await page.keyboard.type(texts[index], { delay: 25 });
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(400);
+      await writePage.mouse.click(300 + index * 250, 300);
+      await writePage.keyboard.type(texts[index], { delay: 25 });
+      await writePage.keyboard.press("Escape");
+      await writePage.waitForTimeout(400);
     }
-    await page.waitForTimeout(1800); // let every save + live-reload echo settle
+    await writePage.waitForTimeout(1800); // let every save + live-reload echo settle
 
-    const onCanvas = await page.locator(".note").allInnerTexts();
+    const onCanvas = await writePage.locator(".note").allInnerTexts();
     for (const wanted of texts) {
       expect(
         onCanvas.some((actual) => actual.trim() === wanted),
@@ -434,5 +507,6 @@ export async function run({ page, step, expect, config }) {
         )}`
       );
     }
+    await writePage.close();
   });
 }

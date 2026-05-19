@@ -1856,6 +1856,15 @@
         };
       }
 
+      if (base.type === "markdown") {
+        return {
+          ...base,
+          text: note.text || "",
+          width: Math.round(Number(note.width)) || 380,
+          height: Math.round(Number(note.height)) || 420,
+        };
+      }
+
       return {
         ...base,
         text: note.text || "",
@@ -2145,6 +2154,8 @@
     element.dataset.mdMode = "preview";
     element.style.left = `${note.x}px`;
     element.style.top = `${note.y}px`;
+    element.style.width = `${Math.round(Number(note.width)) || 380}px`;
+    element.style.height = `${Math.round(Number(note.height)) || 420}px`;
 
     const tabs = document.createElement("div");
     tabs.className = "md-tabs";
@@ -2164,8 +2175,27 @@
 
     const body = document.createElement("div");
     body.className = "md-body";
-    // The body is for content, not dragging — keep clicks off the canvas.
-    body.addEventListener("pointerdown", (event) => event.stopPropagation());
+    // In Preview the body is read-only — pressing it picks up and moves the
+    // whole note, like pressing the tab strip. In Markdown (source) mode the
+    // body is the editor, so keep clicks and text selection inside it.
+    body.addEventListener("pointerdown", (event) => {
+      if (element.dataset.mdMode === "source") {
+        event.stopPropagation();
+        return;
+      }
+      // A press on the body's own scrollbar should scroll, not move.
+      if (
+        event.target === body &&
+        (event.offsetX > body.clientWidth || event.offsetY > body.clientHeight)
+      ) {
+        event.stopPropagation();
+        return;
+      }
+      // Drag moves the note; a plain click does nothing (no select).
+      startMarkdownMove(event, noteId);
+    });
+    // Wheeling inside the body scrolls the document, not the canvas.
+    body.addEventListener("wheel", (event) => event.stopPropagation());
     body.addEventListener("input", () => {
       if (!body.isContentEditable) {
         return;
@@ -2177,7 +2207,14 @@
       }
     });
 
-    element.append(tabs, body);
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "md-resize-handle";
+    resizeHandle.title = "Drag to resize";
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      startMarkdownResize(event, noteId);
+    });
+
+    element.append(tabs, body, resizeHandle);
     setMarkdownMode(element, "preview");
     return element;
   }
@@ -4195,6 +4232,139 @@
     saveNotesNow();
   }
 
+  // --- markdown note resize --------------------------------------------
+
+  function startMarkdownResize(event, noteId) {
+    const note = findNote(noteId);
+    if (!note || note.type !== "markdown") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    syncNotesFromDom();
+
+    const element = paper.querySelector(`[data-id="${CSS.escape(noteId)}"]`);
+    activeDrag = {
+      type: "markdown-resize",
+      pointerId: event.pointerId,
+      noteId,
+      snapshots: captureNoteSnapshots([noteId]),
+      moved: false,
+      startWorld: viewportToWorld(event.clientX, event.clientY),
+      startWidth: element?.offsetWidth || note.width || 380,
+      startHeight: element?.offsetHeight || note.height || 420,
+    };
+
+    viewport.setPointerCapture(event.pointerId);
+  }
+
+  function resizeMarkdownWithPointer(event) {
+    const note = findNote(activeDrag.noteId);
+    if (!note) {
+      return;
+    }
+
+    // World coords so the resize tracks the cursor at any zoom level.
+    const pointerWorld = viewportToWorld(event.clientX, event.clientY);
+    note.width = Math.round(
+      clamp(
+        activeDrag.startWidth + pointerWorld.x - activeDrag.startWorld.x,
+        220,
+        4000
+      )
+    );
+    note.height = Math.round(
+      clamp(
+        activeDrag.startHeight + pointerWorld.y - activeDrag.startWorld.y,
+        140,
+        4000
+      )
+    );
+    activeDrag.moved = true;
+
+    const element = paper.querySelector(`[data-id="${CSS.escape(note.id)}"]`);
+    if (element) {
+      element.style.width = `${note.width}px`;
+      element.style.height = `${note.height}px`;
+    }
+  }
+
+  function endMarkdownResize() {
+    if (!activeDrag.moved) {
+      return;
+    }
+    pushUndoAction({ type: "update", items: activeDrag.snapshots });
+    saveNotesNow();
+  }
+
+  // --- markdown note move (drag the body in Preview mode) --------------
+  //
+  // A press on the preview body starts a threshold drag: move past a few
+  // pixels and the whole note moves; release without moving and nothing
+  // happens — no selection — so the body stays free to read and scroll.
+
+  function startMarkdownMove(event, noteId) {
+    const note = findNote(noteId);
+    if (!note || note.type !== "markdown" || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    syncNotesFromDom();
+
+    activeDrag = {
+      type: "markdown-move",
+      pointerId: event.pointerId,
+      noteId,
+      snapshots: captureNoteSnapshots([noteId]),
+      moved: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      startNoteX: note.x,
+      startNoteY: note.y,
+    };
+
+    viewport.setPointerCapture(event.pointerId);
+  }
+
+  function moveMarkdownWithPointer(event) {
+    const note = findNote(activeDrag.noteId);
+    if (!note) {
+      return;
+    }
+    if (
+      !activeDrag.moved &&
+      Math.hypot(
+        event.clientX - activeDrag.startX,
+        event.clientY - activeDrag.startY
+      ) <= panThreshold
+    ) {
+      return; // still within click tolerance — treat as a click, not a move
+    }
+    activeDrag.moved = true;
+
+    const dx = (event.clientX - activeDrag.startX) / view.scale;
+    const dy = (event.clientY - activeDrag.startY) / view.scale;
+    note.x = Math.round(activeDrag.startNoteX + dx);
+    note.y = Math.round(activeDrag.startNoteY + dy);
+
+    const element = paper.querySelector(`[data-id="${CSS.escape(note.id)}"]`);
+    if (element) {
+      element.style.left = `${note.x}px`;
+      element.style.top = `${note.y}px`;
+    }
+  }
+
+  function endMarkdownMove() {
+    if (!activeDrag.moved) {
+      return;
+    }
+    pushUndoAction({ type: "update", items: activeDrag.snapshots });
+    saveNotesNow();
+  }
+
   // --- image crop -------------------------------------------------------
 
   let cropModeNoteId = "";
@@ -4705,6 +4875,16 @@
       return;
     }
 
+    if (activeDrag.type === "markdown-resize") {
+      resizeMarkdownWithPointer(event);
+      return;
+    }
+
+    if (activeDrag.type === "markdown-move") {
+      moveMarkdownWithPointer(event);
+      return;
+    }
+
     const dx = event.clientX - activeDrag.startX;
     const dy = event.clientY - activeDrag.startY;
     const shouldPan = activeDrag.panOnly || Math.hypot(dx, dy) > panThreshold;
@@ -4743,6 +4923,20 @@
     if (activeDrag.type === "image-rotate" || activeDrag.type === "image-resize") {
       viewport.releasePointerCapture(event.pointerId);
       endImageTransform();
+      activeDrag = null;
+      return;
+    }
+
+    if (activeDrag.type === "markdown-resize") {
+      viewport.releasePointerCapture(event.pointerId);
+      endMarkdownResize();
+      activeDrag = null;
+      return;
+    }
+
+    if (activeDrag.type === "markdown-move") {
+      viewport.releasePointerCapture(event.pointerId);
+      endMarkdownMove();
       activeDrag = null;
       return;
     }

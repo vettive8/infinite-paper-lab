@@ -117,13 +117,17 @@ function serializeBoard(board) {
       lines.push("");
       lines.push("<!-- /ip-note -->", "");
     } else {
-      const attrs = [
+      const attrParts = [
         `id=${note.id}`,
         `type=${note.type === "markdown" ? "markdown" : "text"}`,
         `x=${Math.round(note.x)}`,
         `y=${Math.round(note.y)}`,
-      ].join(" ");
-      lines.push(`<!-- ip-note ${attrs} -->`);
+      ];
+      if (note.type === "markdown") {
+        attrParts.push(`width=${Math.round(note.width) || 380}`);
+        attrParts.push(`height=${Math.round(note.height) || 420}`);
+      }
+      lines.push(`<!-- ip-note ${attrParts.join(" ")} -->`);
       lines.push(String(note.text || ""));
       lines.push("<!-- /ip-note -->", "");
     }
@@ -211,13 +215,19 @@ function parseBoard(text) {
         mimeType: attrs.mimeType || "image/png",
       });
     } else {
-      board.notes.push({
+      const isMarkdown = attrs.type === "markdown";
+      const note = {
         id: attrs.id,
-        type: attrs.type === "markdown" ? "markdown" : "text",
+        type: isMarkdown ? "markdown" : "text",
         x: Number(attrs.x) || 0,
         y: Number(attrs.y) || 0,
         text: body,
-      });
+      };
+      if (isMarkdown) {
+        note.width = Number(attrs.width) || 380;
+        note.height = Number(attrs.height) || 420;
+      }
+      board.notes.push(note);
     }
   }
 
