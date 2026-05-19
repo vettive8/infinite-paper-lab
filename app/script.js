@@ -18,6 +18,7 @@
   const legacyBoardStorageKey = "infinite-paper:v8.1:board";
   const redlineSettingsKey = `${appStoragePrefix}:redlines-enabled`;
   const tabOverlayPositionKey = `${appStoragePrefix}:tab-overlay-position`;
+  const boardOverlayStateKey = `${appStoragePrefix}:board-overlay-open`;
   const syncChannelName = `${appStoragePrefix}:sync`;
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
@@ -60,6 +61,7 @@
   let activeSpelling = null;
   let tabOverlay = null;
   let boardOverlay = null;
+  let lastBoardOverlayToggle = null; // { at, wasHidden } — see "Shift+Tab N"
   let renamingBoardId = "";
   let boardClickTimer = 0;
   let activeTabOverlayDrag = null;
@@ -1191,7 +1193,21 @@
     newButton.type = "button";
     newButton.className = "board-new-button";
     newButton.textContent = "+ New board";
-    newButton.addEventListener("click", createAndSwitchBoard);
+    newButton.addEventListener("click", openNewBoardInTab);
+    // Middle button (scroll-wheel) opens a new board too, matching the
+    // middle-click behaviour of the existing board rows.
+    newButton.addEventListener("pointerdown", (event) => {
+      if (event.button === 1) {
+        event.preventDefault(); // suppress the middle-click autoscroll glyph
+      }
+    });
+    newButton.addEventListener("auxclick", (event) => {
+      if (event.button !== 1) {
+        return;
+      }
+      event.preventDefault();
+      openNewBoardInTab();
+    });
     side.appendChild(newButton);
 
     const list = document.createElement("div");
@@ -1202,6 +1218,12 @@
       row.dataset.boardId = board.id;
       row.dataset.pinned = board.pinned ? "true" : "false";
       row.classList.toggle("is-current", board.id === currentBoardId);
+      // Right-click a row for the board menu (currently: Delete board).
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showBoardContextMenu(board.id, event.clientX, event.clientY);
+      });
 
       if (renamingBoardId === board.id) {
         const renameForm = document.createElement("form");
@@ -1271,6 +1293,7 @@
     side.appendChild(list);
     boardOverlay.appendChild(side);
     syncBoardOverlayUndoRedoControls();
+    updateBoardOverlayHighlight();
   }
 
   function syncBoardOverlayUndoRedoControls() {
@@ -1334,6 +1357,300 @@
     }
   }
 
+  // Creating a board opens it in its own browser tab. The new tab is
+  // launched with ?newboard=1 and spawns the board itself on boot, so the
+  // current tab stays on whatever board it was already showing.
+  function openNewBoardInTab() {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("board"); // the new tab makes its own board
+      url.searchParams.set("newboard", "1");
+      url.hash = "";
+      window.open(url.toString(), "_blank");
+    } catch (error) {
+      console.error("Infinite Paper: could not open a new board tab", error);
+    }
+  }
+
+  // Boot hook: a tab opened with ?newboard=1 creates a fresh board and
+  // drops straight into renaming it.
+  function maybeSpawnNewBoardFromUrl() {
+    let wantsNewBoard = false;
+    try {
+      wantsNewBoard =
+        new URLSearchParams(window.location.search).get("newboard") === "1";
+    } catch (error) {
+      wantsNewBoard = false;
+    }
+    if (!wantsNewBoard) {
+      return;
+    }
+    // Drop the flag first, so refreshing this tab does not spawn again.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("newboard");
+      window.history.replaceState(null, "", url);
+    } catch (error) {
+      // A malformed URL is not worth crashing the app over.
+    }
+    openBoardOverlay();
+    createAndSwitchBoard();
+  }
+
+  // --- board overlay keyboard cursor + multi-selection ---------------
+
+  let boardCursorId = "";
+  let boardSelectionAnchorId = "";
+  let boardSelection = new Set();
+
+  function boardOrderIds() {
+    return sortedBoards().map((board) => board.id);
+  }
+
+  // Move the keyboard highlight to a board. extend:true (Shift+Arrow)
+  // selects the whole inclusive range from the anchor to here; otherwise
+  // the selection collapses to this board and it becomes the new anchor.
+  function setBoardCursor(boardId, options = {}) {
+    if (!boardId || !boards.some((board) => board.id === boardId)) {
+      return;
+    }
+    boardCursorId = boardId;
+    if (options.extend && boardSelectionAnchorId) {
+      const order = boardOrderIds();
+      const a = order.indexOf(boardSelectionAnchorId);
+      const b = order.indexOf(boardId);
+      if (a !== -1 && b !== -1) {
+        boardSelection = new Set(
+          order.slice(Math.min(a, b), Math.max(a, b) + 1)
+        );
+      } else {
+        boardSelection = new Set([boardId]);
+      }
+    } else {
+      boardSelectionAnchorId = boardId;
+      boardSelection = new Set([boardId]);
+    }
+    updateBoardOverlayHighlight();
+  }
+
+  function moveBoardCursor(delta, extend) {
+    const order = boardOrderIds();
+    if (!order.length) {
+      return;
+    }
+    // Drop any lingering button focus so our cursor is the only highlight.
+    if (document.activeElement?.closest?.(".board-list")) {
+      document.activeElement.blur();
+    }
+    let index = order.indexOf(boardCursorId);
+    if (index === -1) {
+      index = order.indexOf(currentBoardId);
+    }
+    index =
+      index === -1
+        ? 0
+        : Math.min(order.length - 1, Math.max(0, index + delta));
+    setBoardCursor(order[index], { extend });
+    const row = boardOverlay?.querySelector(
+      `.board-row[data-board-id="${CSS.escape(order[index])}"]`
+    );
+    row?.scrollIntoView({ block: "nearest" });
+  }
+
+  // Repaint the cursor / selection classes without rebuilding the list.
+  function updateBoardOverlayHighlight() {
+    if (!boardOverlay) {
+      return;
+    }
+    const multi = boardSelection.size > 1;
+    for (const row of boardOverlay.querySelectorAll(".board-row")) {
+      const id = row.dataset.boardId;
+      row.classList.toggle("is-cursor", id === boardCursorId);
+      row.classList.toggle("is-selected", multi && boardSelection.has(id));
+    }
+  }
+
+  // --- board deletion -------------------------------------------------
+
+  function boardTitleOf(boardId) {
+    const board = boards.find((item) => item.id === boardId);
+    return board ? board.title || "Untitled board" : "board";
+  }
+
+  function deleteBoard(boardId) {
+    return deleteBoards([boardId]);
+  }
+
+  async function deleteBoards(ids) {
+    const targets = [...new Set(ids)].filter((id) =>
+      boards.some((board) => board.id === id)
+    );
+    if (!targets.length) {
+      return;
+    }
+    if (targets.length >= boards.length) {
+      showPasteStatus("Can't delete every board — keep at least one", true);
+      return;
+    }
+
+    const label =
+      targets.length === 1
+        ? `board "${boardTitleOf(targets[0])}"`
+        : `${targets.length} boards`;
+
+    // Confirm only the first time — once acknowledged, later deletes are
+    // immediate.
+    const deleteConfirmedKey = `${appStoragePrefix}:board-delete-confirmed`;
+    let alreadyConfirmed = false;
+    try {
+      alreadyConfirmed = localStorage.getItem(deleteConfirmedKey) === "1";
+    } catch (error) {
+      alreadyConfirmed = false;
+    }
+    if (!alreadyConfirmed) {
+      const confirmed = window.confirm(
+        `Delete ${label}?\n\n` +
+          "This permanently removes the .md file(s) and cannot be undone.\n" +
+          "(You won't be asked again.)"
+      );
+      if (!confirmed) {
+        return;
+      }
+      try {
+        localStorage.setItem(deleteConfirmedKey, "1");
+      } catch (error) {
+        // Non-fatal: the confirm just shows again next time.
+      }
+    }
+
+    // Work out where the cursor should land afterwards: the first
+    // surviving board below the deleted run, else the first one above it.
+    const order = boardOrderIds();
+    const targetSet = new Set(targets);
+    const indices = targets.map((id) => order.indexOf(id));
+    const lastIndex = Math.max(...indices);
+    const firstIndex = Math.min(...indices);
+    let landingId = "";
+    for (let i = lastIndex + 1; i < order.length && !landingId; i += 1) {
+      if (!targetSet.has(order[i])) {
+        landingId = order[i];
+      }
+    }
+    for (let i = firstIndex - 1; i >= 0 && !landingId; i -= 1) {
+      if (!targetSet.has(order[i])) {
+        landingId = order[i];
+      }
+    }
+
+    // If we're viewing a doomed board, move off it first — skipSave so the
+    // leaving board isn't re-saved (which would re-create its .md file).
+    if (targetSet.has(currentBoardId) && landingId) {
+      await switchBoard(landingId, { skipSave: true });
+    }
+
+    const deleted = [];
+    for (const id of targets) {
+      boardWriteQueue.delete(id); // drop queued writes so they can't revive it
+      try {
+        await apiJson(`/api/boards/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        deleted.push(id);
+      } catch (error) {
+        console.error("Infinite Paper: failed to delete board", id, error);
+      }
+    }
+    if (!deleted.length) {
+      showPasteStatus("Could not delete the board(s)", true);
+      return;
+    }
+
+    const deletedSet = new Set(deleted);
+    boards = boards.filter((board) => !deletedSet.has(board.id));
+    renumberBoards();
+    saveBoardsIndex();
+
+    // Park the keyboard cursor on the landing board.
+    if (landingId && boards.some((board) => board.id === landingId)) {
+      setBoardCursor(landingId);
+    } else if (boards.length) {
+      setBoardCursor(boards[0].id);
+    }
+
+    renderBoardOverlay();
+    showPasteStatus(
+      deleted.length === 1
+        ? `Deleted ${label}`
+        : `Deleted ${deleted.length} boards`
+    );
+  }
+
+  // --- board right-click menu ----------------------------------------
+
+  let boardContextMenu = null;
+
+  function closeBoardContextMenu() {
+    if (!boardContextMenu) {
+      return;
+    }
+    boardContextMenu.remove();
+    boardContextMenu = null;
+    window.removeEventListener("pointerdown", dismissBoardContextMenu, true);
+    window.removeEventListener("keydown", onBoardContextMenuKey, true);
+  }
+
+  function dismissBoardContextMenu(event) {
+    if (boardContextMenu && !boardContextMenu.contains(event.target)) {
+      closeBoardContextMenu();
+    }
+  }
+
+  function onBoardContextMenuKey(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeBoardContextMenu();
+    }
+  }
+
+  function showBoardContextMenu(boardId, x, y) {
+    closeBoardContextMenu();
+    if (!boards.some((item) => item.id === boardId)) {
+      return;
+    }
+
+    const menu = document.createElement("div");
+    menu.className = "board-context-menu";
+
+    const deleteItem = document.createElement("button");
+    deleteItem.type = "button";
+    deleteItem.className = "board-context-item is-danger";
+    deleteItem.textContent = "Delete board";
+    deleteItem.addEventListener("click", () => {
+      closeBoardContextMenu();
+      deleteBoard(boardId);
+    });
+    menu.appendChild(deleteItem);
+
+    document.body.appendChild(menu);
+
+    // Keep the menu fully on-screen.
+    const rect = menu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+    const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    boardContextMenu = menu;
+    // Defer the dismiss listeners so the opening event doesn't close it.
+    window.setTimeout(() => {
+      if (!boardContextMenu) {
+        return;
+      }
+      window.addEventListener("pointerdown", dismissBoardContextMenu, true);
+      window.addEventListener("keydown", onBoardContextMenuKey, true);
+    }, 0);
+  }
+
   function finishBoardRename(boardId, value) {
     if (renamingBoardId !== boardId) {
       return;
@@ -1360,11 +1677,36 @@
     renderBoardOverlay();
   }
 
+  // Remember whether the overlay is open so a refresh restores it. Stored
+  // in sessionStorage, so the state is per-tab and survives a reload but
+  // not the tab closing.
+  function saveBoardOverlayState(open) {
+    try {
+      sessionStorage.setItem(boardOverlayStateKey, open ? "1" : "0");
+    } catch (error) {
+      // Non-fatal — the overlay just won't survive a refresh.
+    }
+  }
+
+  function restoreBoardOverlayState() {
+    let wasOpen = false;
+    try {
+      wasOpen = sessionStorage.getItem(boardOverlayStateKey) === "1";
+    } catch (error) {
+      wasOpen = false;
+    }
+    if (wasOpen) {
+      openBoardOverlay();
+    }
+  }
+
   function openBoardOverlay() {
     hideSpellingBubble();
     const overlay = getBoardOverlay();
+    setBoardCursor(currentBoardId); // start the keyboard cursor on the current board
     renderBoardOverlay();
     overlay.hidden = false;
+    saveBoardOverlayState(true);
   }
 
   function closeBoardOverlay() {
@@ -1373,10 +1715,15 @@
       renamingBoardId = "";
       boardOverlay.hidden = true;
     }
+    closeBoardContextMenu();
+    saveBoardOverlayState(false);
   }
 
   function toggleBoardOverlay() {
     const overlay = getBoardOverlay();
+    // Remember the pre-toggle state so a following N (the "Shift+Tab N"
+    // gesture) can undo this toggle and leave the page's overlay as it was.
+    lastBoardOverlayToggle = { at: Date.now(), wasHidden: overlay.hidden };
     if (overlay.hidden) {
       openBoardOverlay();
     } else {
@@ -1384,7 +1731,19 @@
     }
   }
 
-  async function switchBoard(boardId) {
+  // Undo a board-overlay toggle — used when a Shift+Tab turns out to have
+  // been the lead-in to a "Shift+Tab N" gesture, which must leave this
+  // page's overlay exactly as it was.
+  function restoreBoardOverlay(shouldBeHidden) {
+    const overlay = getBoardOverlay();
+    if (shouldBeHidden && !overlay.hidden) {
+      closeBoardOverlay();
+    } else if (!shouldBeHidden && overlay.hidden) {
+      openBoardOverlay();
+    }
+  }
+
+  async function switchBoard(boardId, options = {}) {
     if (!boards.some((board) => board.id === boardId)) {
       return;
     }
@@ -1394,15 +1753,22 @@
 
     clearTimeout(boardClickTimer);
     renamingBoardId = "";
-    saveNotesNow();
-    saveViewNow();
+    // skipSave: used when the board we're leaving is about to be deleted —
+    // saving it would just re-create the .md file we're removing.
+    if (!options.skipSave) {
+      saveNotesNow();
+      saveViewNow();
+    }
     currentBoardId = boardId;
     syncBoardUrl();
+    setBoardCursor(boardId); // keep the keyboard cursor on the viewed board
 
     const board = getCurrentBoard();
     if (board) {
       board.lastOpenedAt = Date.now();
-      saveBoardsIndex();
+      if (!options.skipSave) {
+        saveBoardsIndex();
+      }
     }
 
     for (const element of paper.querySelectorAll(".image-note")) {
@@ -4531,6 +4897,93 @@
       return;
     }
 
+    // N creates a new board in its own tab — the keyboard form of
+    // "+ New board". It works whether or not the overlay is open, so the
+    // habitual "Shift+Tab then N" gesture always lands a new board, even
+    // when that Shift+Tab just toggled the overlay shut.
+    if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "n" &&
+      !renamingBoardId &&
+      !isTextEntryElement(document.activeElement)
+    ) {
+      event.preventDefault();
+      // "Shift+Tab N": if a Shift+Tab toggled the overlay a moment ago, it
+      // was the lead-in to this gesture — undo it so this page's overlay is
+      // left untouched (the new board opens in its own tab instead).
+      if (
+        lastBoardOverlayToggle &&
+        Date.now() - lastBoardOverlayToggle.at < 1000
+      ) {
+        restoreBoardOverlay(lastBoardOverlayToggle.wasHidden);
+        lastBoardOverlayToggle = null;
+      }
+      openNewBoardInTab();
+      return;
+    }
+
+    // Arrow keys move the highlight through the board list; holding Shift
+    // extends a multi-board selection.
+    if (
+      (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      boardOverlay &&
+      !boardOverlay.hidden &&
+      !renamingBoardId &&
+      !isTextEntryElement(document.activeElement)
+    ) {
+      event.preventDefault();
+      moveBoardCursor(event.key === "ArrowDown" ? 1 : -1, event.shiftKey);
+      return;
+    }
+
+    // Delete removes the highlighted board — or every board in the
+    // multi-selection — and lands the highlight on the board below.
+    if (
+      event.key === "Delete" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      boardOverlay &&
+      !boardOverlay.hidden &&
+      !renamingBoardId &&
+      !isTextEntryElement(document.activeElement)
+    ) {
+      event.preventDefault();
+      const ids = boardSelection.size
+        ? [...boardSelection]
+        : boardCursorId
+        ? [boardCursorId]
+        : [];
+      if (ids.length) {
+        deleteBoards(ids);
+      }
+      return;
+    }
+
+    // Enter opens (switches to) the highlighted board.
+    if (
+      event.key === "Enter" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      boardOverlay &&
+      !boardOverlay.hidden &&
+      !renamingBoardId &&
+      !isTextEntryElement(document.activeElement)
+    ) {
+      if (boardCursorId) {
+        event.preventDefault();
+        switchBoard(boardCursorId);
+      }
+      return;
+    }
+
     if (!titleBar.hidden && event.key === "Escape") {
       event.preventDefault();
       closeTitleRename();
@@ -4734,5 +5187,7 @@
     applyView();
     renderNotes();
     setupLiveReload();
+    restoreBoardOverlayState();
+    maybeSpawnNewBoardFromUrl();
   })();
 })();

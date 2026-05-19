@@ -127,6 +127,24 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("pressing N opens a new board in its own browser tab", async () => {
+    // The board overlay is still open from the previous step.
+    const popupPromise = page.context().waitForEvent("page", { timeout: 8000 });
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press("n");
+    const popup = await popupPromise;
+    await popup.waitForLoadState("domcontentloaded");
+
+    // The new tab spawns its own board and opens straight into rename.
+    await popup.waitForSelector(".board-rename-input", { timeout: 8000 });
+    const focused = await popup.evaluate(
+      () =>
+        document.activeElement?.classList?.contains("board-rename-input") || false
+    );
+    expect(focused, "the new tab did not open in board-rename mode");
+    await popup.close();
+  });
+
   await step("dragging a board reorders the list", async () => {
     const order = () =>
       page

@@ -356,6 +356,14 @@ body {
   background: rgb(106 167 255 / 15%);
 }
 
+.board-row.is-selected {
+  background: rgb(106 167 255 / 30%);
+}
+
+.board-row.is-cursor {
+  box-shadow: inset 0 0 0 1.5px rgb(123 178 255 / 85%);
+}
+
 .board-row.is-dragging {
   position: relative;
   z-index: 5;
@@ -417,6 +425,49 @@ body {
 .board-pin:focus-visible {
   background: #272b2d;
   outline: 0;
+}
+
+.board-context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 168px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #343434;
+  border-radius: 8px;
+  background: #171a1b;
+  color: #f3f3f3;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 38%);
+  font: 13px/1.25 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  user-select: none;
+}
+
+.board-context-item {
+  appearance: none;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.board-context-item:hover,
+.board-context-item:focus-visible {
+  background: #272b2d;
+  outline: 0;
+}
+
+.board-context-item.is-danger {
+  color: #ff7b72;
+}
+
+.board-context-item.is-danger:hover,
+.board-context-item.is-danger:focus-visible {
+  background: rgb(255 80 75 / 16%);
 }
 
 .find-bar,
