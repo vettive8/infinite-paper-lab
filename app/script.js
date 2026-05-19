@@ -464,9 +464,23 @@
 
   // --- live reload: pick up external (VS Code / AI) board edits --------
 
+  // True while the cursor is inside a note — a live-reload refresh or a
+  // cross-tab sync must never overwrite a note that is being typed into.
+  function isEditingANote() {
+    const active = document.activeElement;
+    return Boolean(
+      active &&
+        (active.classList.contains("note") ||
+          active.classList.contains("md-body"))
+    );
+  }
+
   function hasUnsyncedChanges() {
     return (
-      pendingNoteSave || boardWriteQueue.size > 0 || boardWriteActive.size > 0
+      pendingNoteSave ||
+      isEditingANote() ||
+      boardWriteQueue.size > 0 ||
+      boardWriteActive.size > 0
     );
   }
 
@@ -2528,11 +2542,10 @@
   }
 
   function renderSyncedNotes() {
-    const activeElement = document.activeElement?.classList.contains("note")
+    // Any focused note is protected — its DOM text is never reset under it.
+    const protectedElement = document.activeElement?.classList.contains("note")
       ? document.activeElement
       : null;
-    const protectedElement =
-      activeElement && dirtyNoteIds.has(activeElement.dataset.id) ? activeElement : null;
     const noteIds = new Set(notes.map((note) => note.id));
 
     for (const element of Array.from(paper.querySelectorAll(".board-item"))) {
@@ -2579,6 +2592,9 @@
   function applyIncomingBoard(state) {
     if (!state || state.origin === clientId || !Array.isArray(state.notes)) {
       return;
+    }
+    if (isEditingANote()) {
+      return; // never disturb a note the user is typing into
     }
 
     if (state.boardId && state.boardId !== currentBoardId) {

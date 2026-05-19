@@ -350,4 +350,35 @@ export async function run({ page, step, expect, config }) {
       `the Markdown tab should show the raw source: ${raw}`
     );
   });
+
+  await step("writing several notes keeps each note's text intact", async () => {
+    // Write on a fresh empty board.
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForSelector(".board-overlay:not([hidden])", { timeout: 4000 });
+    await page.locator(".board-new-button").click();
+    await page.waitForSelector(".board-rename-input", { timeout: 4000 });
+    await page.keyboard.type("Writing Test", { delay: 20 });
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Shift+Tab"); // close the overlay
+    await page.waitForTimeout(400);
+
+    const texts = ["alpha note one", "bravo note two", "charlie note three"];
+    for (let index = 0; index < texts.length; index += 1) {
+      await page.mouse.click(300 + index * 250, 300);
+      await page.keyboard.type(texts[index], { delay: 25 });
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+    }
+    await page.waitForTimeout(1800); // let every save + live-reload echo settle
+
+    const onCanvas = await page.locator(".note").allInnerTexts();
+    for (const wanted of texts) {
+      expect(
+        onCanvas.some((actual) => actual.trim() === wanted),
+        `note "${wanted}" is missing or garbled — canvas has: ${JSON.stringify(
+          onCanvas
+        )}`
+      );
+    }
+  });
 }
