@@ -31,10 +31,24 @@ notes directory — set by `NOTES_DIR`, default
 ## What it does
 
 Each board is one `.md` file on disk — portable, git-trackable, editable in
-VS Code, and reachable by AI tools, while the canvas UI is unchanged.
-Boards reorder by drag and live in pinned / unpinned groups; pasted images
-crop, rotate and mirror; a dropped `.md` file imports as a new board; and
-markdown notes render as formatted documents.
+VS Code, and reachable by AI tools — while the canvas UI stays fast and local.
+On the canvas you can:
+
+- Place **text notes** (click), paste **screenshots** (resize / rotate /
+  mirror / crop), and drop **`.md` files** that render as formatted markdown
+  documents (resizable, scrollable, with a raw-source tab).
+- Manage **boards** from the `Shift`+`Tab` overlay: switch, pin, reorder
+  (drag), rename, and delete (right-click, or keyboard `Delete` with
+  `Shift`+arrow multi-select). Arrow keys navigate, `Enter` opens.
+- Open any board in its **own browser tab** (`+ New board`, `Shift`+`Tab` then
+  `N`, or middle-click) — the URL carries `?board=<id>`, so refreshing or
+  sharing a link reopens the same board.
+
+Boards are saved as Markdown in `NOTES_DIR`; pasted images are stored as files
+under `attachments/`, portable across browsers. Edit a board's `.md`
+externally and the canvas live-reloads.
+
+See [`app/README.md`](app/README.md) for the full feature list and shortcuts.
 
 ## Branches
 
