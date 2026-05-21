@@ -1438,10 +1438,6 @@
     if (!order.length) {
       return;
     }
-    // Drop any lingering button focus so our cursor is the only highlight.
-    if (document.activeElement?.closest?.(".board-list")) {
-      document.activeElement.blur();
-    }
     let index = order.indexOf(boardCursorId);
     if (index === -1) {
       index = order.indexOf(currentBoardId);
@@ -1451,10 +1447,24 @@
         ? 0
         : Math.min(order.length - 1, Math.max(0, index + delta));
     setBoardCursor(order[index], { extend });
+    // Move real focus onto the cursor row — keeps focus inside the overlay
+    // so Delete targets a board only while you're actually navigating it.
+    focusBoardCursorRow();
     const row = boardOverlay?.querySelector(
       `.board-row[data-board-id="${CSS.escape(order[index])}"]`
     );
     row?.scrollIntoView({ block: "nearest" });
+  }
+
+  // Put keyboard focus on the cursor row's button (without a scroll jump).
+  function focusBoardCursorRow() {
+    if (!boardOverlay || boardOverlay.hidden) {
+      return;
+    }
+    const button = boardOverlay.querySelector(
+      `.board-row[data-board-id="${CSS.escape(boardCursorId)}"] .board-select`
+    );
+    button?.focus({ preventScroll: true });
   }
 
   // Repaint the cursor / selection classes without rebuilding the list.
@@ -1578,6 +1588,7 @@
     }
 
     renderBoardOverlay();
+    focusBoardCursorRow();
     showPasteStatus(
       deleted.length === 1
         ? `Deleted ${label}`
@@ -1724,6 +1735,12 @@
     // Remember the pre-toggle state so a following N (the "Shift+Tab N"
     // gesture) can undo this toggle and leave the page's overlay as it was.
     lastBoardOverlayToggle = { at: Date.now(), wasHidden: overlay.hidden };
+    // Shift+Tab is a context switch to board management — drop focus out of
+    // any note being edited, so the next key (e.g. N for a new board) is the
+    // shortcut and isn't typed into the note.
+    if (isTextEntryElement(document.activeElement)) {
+      document.activeElement.blur();
+    }
     if (overlay.hidden) {
       openBoardOverlay();
     } else {
@@ -2006,6 +2023,59 @@
     });
   }
 
+  // --- portable image storage (server attachments) --------------------
+  //
+  // Image bytes are written to the local server's notes folder (an
+  // `attachments/` file) so a pasted screenshot shows in any browser, not
+  // just the one that pasted it. IndexedDB (above) stays as a per-browser
+  // cache + undo source, and as the migration source for older boards.
+
+  function mimeToExt(mime) {
+    switch ((mime || "").toLowerCase()) {
+      case "image/jpeg":
+      case "image/jpg":
+        return "jpg";
+      case "image/webp":
+        return "webp";
+      case "image/gif":
+        return "gif";
+      case "image/svg+xml":
+        return "svg";
+      default:
+        return "png";
+    }
+  }
+
+  function attachmentUrl(note) {
+    if (!note || !note.imageId) {
+      return "";
+    }
+    return `${apiBase}/attachments/${encodeURIComponent(note.imageId)}.${mimeToExt(
+      note.mimeType
+    )}`;
+  }
+
+  // Best-effort — never throws, so a server hiccup can't break a paste.
+  async function uploadAttachment(imageId, blob) {
+    if (!imageId || !blob) {
+      return false;
+    }
+    try {
+      const ext = mimeToExt(blob.type);
+      const response = await fetch(
+        `${apiBase}/api/attachments?id=${encodeURIComponent(imageId)}&ext=${ext}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": blob.type || "application/octet-stream" },
+          body: blob,
+        }
+      );
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async function getImageDimensions(blob) {
     const url = URL.createObjectURL(blob);
     try {
@@ -2020,23 +2090,38 @@
     }
   }
 
-  async function loadImageIntoElement(note, image) {
+  function loadImageIntoElement(note, image) {
     image.dataset.imageId = note.imageId || "";
-    try {
-      const blob = await getImageBlob(note.imageId);
-      if (!blob || image.dataset.imageId !== note.imageId) {
+    if (!note.imageId) {
+      image.removeAttribute("src");
+      return;
+    }
+
+    // Prefer the server file (portable across browsers). If it isn't there —
+    // e.g. an older board whose bytes only live in this browser's IndexedDB —
+    // fall back to IndexedDB and upload it so it's portable from now on.
+    image.onerror = () => {
+      image.onerror = null;
+      if (image.dataset.imageId !== note.imageId) {
         return;
       }
-
-      if (image.dataset.objectUrl) {
-        URL.revokeObjectURL(image.dataset.objectUrl);
-      }
-      const url = URL.createObjectURL(blob);
-      image.dataset.objectUrl = url;
-      image.src = url;
-    } catch {
-      image.removeAttribute("src");
-    }
+      getImageBlob(note.imageId)
+        .then((blob) => {
+          if (!blob || image.dataset.imageId !== note.imageId) {
+            image.removeAttribute("src");
+            return;
+          }
+          uploadAttachment(note.imageId, blob); // migrate to the server
+          if (image.dataset.objectUrl) {
+            URL.revokeObjectURL(image.dataset.objectUrl);
+          }
+          const url = URL.createObjectURL(blob);
+          image.dataset.objectUrl = url;
+          image.src = url;
+        })
+        .catch(() => image.removeAttribute("src"));
+    };
+    image.src = attachmentUrl(note);
   }
 
   function releaseImageElement(element) {
@@ -3867,7 +3952,10 @@
 
   async function createImageNoteFromBlob(blob, point, index) {
     const imageId = makeId();
-    await saveImageBlob(imageId, blob);
+    await Promise.allSettled([
+      saveImageBlob(imageId, blob), // per-browser cache + undo source
+      uploadAttachment(imageId, blob), // portable server file
+    ]);
     const naturalSize = await getImageDimensions(blob);
     const displaySize = getDisplaySize(naturalSize.width, naturalSize.height);
     const offset = index * 28;
@@ -3927,7 +4015,10 @@
         const imageId = makeId();
         note.id = imageId;
         note.imageId = imageId;
-        await saveImageBlob(imageId, item.blob);
+        await Promise.allSettled([
+          saveImageBlob(imageId, item.blob),
+          uploadAttachment(imageId, item.blob),
+        ]);
       } else {
         note.id = makeId();
       }
@@ -5144,6 +5235,7 @@
       !event.altKey &&
       boardOverlay &&
       !boardOverlay.hidden &&
+      boardOverlay.contains(document.activeElement) &&
       !renamingBoardId &&
       !isTextEntryElement(document.activeElement)
     ) {
