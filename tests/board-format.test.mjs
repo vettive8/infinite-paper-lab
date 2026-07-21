@@ -135,6 +135,31 @@ test("image note round-trips geometry, flips, and crop", () => {
   assert.deepEqual(roundTrip(board).notes, board.notes);
 });
 
+test("image note body is a preview-friendly markdown link", () => {
+  const board = makeBoard({
+    notes: [
+      {
+        id: "i1",
+        type: "image",
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 180,
+        rotation: 0,
+        flipX: false,
+        flipY: false,
+        crop: { x: 0, y: 0, w: 1, h: 1 },
+        imageId: "3f9a2b1c",
+        mimeType: "image/jpeg",
+      },
+    ],
+  });
+  const text = serializeBoard(board);
+  assert.match(text, /!\[\]\(\.\.\/attachments\/3f9a2b1c\.jpg\)/);
+  // The body is derived — parsing ignores it and keeps imageId canonical.
+  assert.deepEqual(parseBoard(text).notes, board.notes);
+});
+
 test("multiple notes keep their order", () => {
   const board = makeBoard({
     notes: [
