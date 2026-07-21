@@ -509,4 +509,234 @@ export async function run({ page, step, expect, config }) {
     }
     await writePage.close();
   });
+
+  await step("Find (Ctrl+F) locates note text", async () => {
+    if (await page.locator(".board-overlay:not([hidden])").count()) {
+      await page.keyboard.press("Shift+Tab"); // close the board overlay
+      await page.waitForTimeout(300);
+    }
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.mouse.click(340, 700);
+    await page.keyboard.type("find target zulu", { delay: 35 });
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+
+    await page.keyboard.press("Control+f");
+    await page.waitForSelector("#find-bar:not([hidden])", { timeout: 4000 });
+    await page.keyboard.type("zulu", { delay: 60 });
+    await page.keyboard.press("Enter");
+    await waitFor(
+      async () => {
+        const count = await page.locator("#find-count").innerText();
+        return count.trim() !== "0/0" && !count.trim().startsWith("0");
+      },
+      4000,
+      "the find counter to show a match"
+    );
+    await page.keyboard.press("Escape"); // close the find bar
+    await page.waitForTimeout(300);
+  });
+
+  await step("undo removes the last note, redo restores it (Ctrl+Z / Ctrl+Y)", async () => {
+    await page.evaluate(() => document.activeElement?.blur());
+    const hasNote = async () =>
+      (await page.locator(".note").allInnerTexts()).some((t) =>
+        t.includes("undo victim")
+      );
+    await page.mouse.click(340, 760);
+    await page.keyboard.type("undo victim", { delay: 35 });
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);
+    expect(await hasNote(), "the note to undo was never created");
+
+    for (let i = 0; i < 6 && (await hasNote()); i += 1) {
+      await page.keyboard.press("Control+z");
+      await page.waitForTimeout(350);
+    }
+    expect(!(await hasNote()), "Ctrl+Z did not remove the new note");
+
+    for (let i = 0; i < 6 && !(await hasNote()); i += 1) {
+      await page.keyboard.press("Control+y");
+      await page.waitForTimeout(350);
+    }
+    expect(await hasNote(), "Ctrl+Y did not restore the note");
+  });
+
+  await step("copying a selected note and pasting duplicates it", async () => {
+    const matching = () =>
+      page
+        .locator(".note")
+        .allInnerTexts()
+        .then((all) => all.filter((t) => t.includes("find target zulu")).length);
+    const before = await matching();
+    expect(before >= 1, "the source note is missing");
+
+    // Rubber-band select around the note (right-button drag — a left drag
+    // on empty canvas pans the view), then copy + paste.
+    const note = page
+      .locator(".note")
+      .filter({ hasText: "find target zulu" })
+      .first();
+    const box = await note.boundingBox();
+    await page.mouse.move(box.x - 40, box.y - 30);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.move(box.x + box.width + 40, box.y + box.height + 30, {
+      steps: 10,
+    });
+    await page.mouse.up({ button: "right" });
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Control+c");
+    await page.waitForTimeout(500);
+    await page.mouse.move(820, 700); // paste lands at the pointer
+    await page.keyboard.press("Control+v");
+    await waitFor(
+      async () => (await matching()) > before,
+      5000,
+      "a pasted copy of the note to appear"
+    );
+  });
+
+  await step("R rotates and M mirrors a pasted image", async () => {
+    // Fresh image on the clipboard (the copy step overwrote it with text).
+    await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 200;
+      canvas.height = 120;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#2b74d6";
+      ctx.fillRect(0, 0, 100, 120);
+      ctx.fillStyle = "#f6b500";
+      ctx.fillRect(100, 0, 100, 120);
+      const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    });
+    const before = await page.locator(".image-note").count();
+    await page.mouse.move(900, 300);
+    await page.keyboard.press("Control+v");
+    await waitFor(
+      async () => (await page.locator(".image-note").count()) > before,
+      6000,
+      "the pasted image note"
+    );
+    const image = page.locator(".image-note").last();
+    await image.click(); // select it
+    await page.waitForTimeout(300);
+
+    await page.keyboard.press("r");
+    await page.waitForTimeout(600);
+    await waitFor(
+      () =>
+        boardFiles().some((f) =>
+          /type=image[^\n]*rotation=90/.test(fs.readFileSync(f, "utf8"))
+        ),
+      5000,
+      "rotation=90 to be written to the .md"
+    );
+
+    await page.keyboard.press("m");
+    await page.waitForTimeout(600);
+    await waitFor(
+      () =>
+        boardFiles().some((f) =>
+          /type=image[^\n]*flipX=true/.test(fs.readFileSync(f, "utf8"))
+        ),
+      5000,
+      "flipX=true to be written to the .md"
+    );
+  });
+
+  await step("double-click renames a board; Pin pins it (both reach the file)", async () => {
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForSelector(".board-overlay:not([hidden])", { timeout: 4000 });
+
+    const row = page
+      .locator(".board-row")
+      .filter({ hasText: "Second Board" })
+      .first();
+    expect((await row.count()) >= 1, "the 'Second Board' row is missing");
+    await row.locator(".board-select").dblclick();
+    await page.waitForSelector(".board-rename-input", { timeout: 4000 });
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type("Renamed Board", { delay: 35 });
+    await page.keyboard.press("Enter");
+    await waitFor(
+      () => boardFiles().some((f) => f.endsWith("renamed-board.md")),
+      6000,
+      "the board file to be renamed on disk"
+    );
+
+    const renamedRow = page
+      .locator(".board-row")
+      .filter({ hasText: "Renamed Board" })
+      .first();
+    await renamedRow.locator(".board-pin").click();
+    await waitFor(
+      () => {
+        const f = boardFiles().find((x) => x.endsWith("renamed-board.md"));
+        return f && fs.readFileSync(f, "utf8").includes("pinned: true");
+      },
+      6000,
+      "pinned: true to reach the board file"
+    );
+  });
+
+  await step("deleting a board moves its .md to trash (recoverable)", async () => {
+    const trashDir = path.join(TEST_NOTES, "trash");
+    const before = boardFiles().length;
+
+    page.once("dialog", (dialog) => dialog.accept()); // first-delete confirm
+    const row = page
+      .locator(".board-row")
+      .filter({ hasText: "Renamed Board" })
+      .first();
+    await row.locator(".board-select").click({ button: "right" });
+    await page.waitForSelector(".board-context-menu", { timeout: 4000 });
+    await page.locator(".board-context-item.is-danger").click();
+
+    await waitFor(
+      () => boardFiles().length === before - 1,
+      6000,
+      "the board file to leave boards/"
+    );
+    const trashed = fs.existsSync(trashDir) ? fs.readdirSync(trashDir) : [];
+    expect(
+      trashed.some((name) => name.endsWith("renamed-board.md")),
+      `renamed-board.md is not in trash/ — found: ${trashed.join(", ")}`
+    );
+    await page.keyboard.press("Shift+Tab"); // close the overlay
+    await page.waitForTimeout(300);
+  });
+
+  await step("dark mode toggles from the Tab overlay and survives reload", async () => {
+    const theme = () =>
+      page.evaluate(() => document.documentElement.dataset.theme || "light");
+    const canvasBg = () =>
+      page.evaluate(
+        () => getComputedStyle(document.getElementById("viewport")).backgroundColor
+      );
+    const themeBefore = await theme();
+    const bgBefore = await canvasBg();
+
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press("Tab"); // open the tab overlay
+    await page.waitForSelector(".tab-overlay:not([hidden])", { timeout: 4000 });
+    await page.locator("[data-action='toggle-theme']").click();
+    await page.waitForTimeout(500);
+
+    const themeAfter = await theme();
+    expect(themeAfter !== themeBefore, "the theme did not change");
+    expect((await canvasBg()) !== bgBefore, "the canvas background did not change");
+
+    await page.reload();
+    await page.waitForSelector("#paper", { timeout: 8000 });
+    expect(
+      (await theme()) === themeAfter,
+      `theme did not survive the reload (wanted ${themeAfter})`
+    );
+    expect(
+      (await canvasBg()) !== bgBefore,
+      "the canvas reverted to the old background after reload"
+    );
+  });
 }
