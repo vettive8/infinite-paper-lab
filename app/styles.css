@@ -1,7 +1,58 @@
+/* Theme palettes. The canvas and note surfaces are themeable; the overlay
+   chrome (board sidebar, find bar, tab overlay) is dark in both themes.
+   script.js sets data-theme="light" | "dark" on <html>. */
 :root {
   color-scheme: light;
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #fff;
+  background: var(--canvas-bg);
+
+  --canvas-bg: #fff;
+  --ink: #111;
+  --ink-muted: #777;
+  --panel-bg: #fff;
+  --panel-border: #d8d8d8;
+  --panel-hover: #f1f3f4;
+  --note-selection: #cfe3ff;
+  --md-bg: #fff;
+  --md-border: #d4d8dd;
+  --md-ink: #222;
+  --md-heading: #1f2933;
+  --md-source-ink: #2b3138;
+  --md-surface: #f1f3f5;
+  --md-surface-border: #e4e8ec;
+  --md-tab-ink: #6b747d;
+  --md-quote-border: #c7ccd1;
+  --md-quote-ink: #5a636c;
+  --md-grip: #c2c8cf;
+  --link: #3478f6;
+  --error-ink: #9b1c1c;
+  --error-border: #e3a4a4;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas-bg: #141619;
+  --ink: #e6e6e6;
+  --ink-muted: #9aa0a6;
+  --panel-bg: #1d2023;
+  --panel-border: #383d42;
+  --panel-hover: #2a2e33;
+  --note-selection: #2b4b73;
+  --md-bg: #1b1e21;
+  --md-border: #33383d;
+  --md-ink: #d9dde1;
+  --md-heading: #edf0f2;
+  --md-source-ink: #c9d1d9;
+  --md-surface: #24282c;
+  --md-surface-border: #33383d;
+  --md-tab-ink: #9aa4ad;
+  --md-quote-border: #4a5158;
+  --md-quote-ink: #9aa4ad;
+  --md-grip: #4a5158;
+  --link: #6aa7ff;
+  --error-ink: #ff9d94;
+  --error-border: #7a3b36;
 }
 
 * {
@@ -14,7 +65,7 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #fff;
+  background: var(--canvas-bg);
 }
 
 body {
@@ -27,7 +78,7 @@ body {
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
-  background: #fff;
+  background: var(--canvas-bg);
   cursor: text;
   touch-action: none;
   user-select: none;
@@ -92,18 +143,18 @@ body {
   bottom: 14px;
   z-index: 25;
   padding: 6px 9px;
-  border: 1px solid #d8d8d8;
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  background: #fff;
-  color: #111;
+  background: var(--panel-bg);
+  color: var(--ink);
   box-shadow: 0 8px 20px rgb(0 0 0 / 12%);
   font: 12px/1.2 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   pointer-events: none;
 }
 
 .paste-status.is-error {
-  border-color: #e3a4a4;
-  color: #9b1c1c;
+  border-color: var(--error-border);
+  color: var(--error-ink);
 }
 
 .paste-status[hidden] {
@@ -129,10 +180,10 @@ body {
   gap: 5px;
   max-width: min(520px, calc(100vw - 16px));
   padding: 6px;
-  border: 1px solid #d8d8d8;
+  border: 1px solid var(--panel-border);
   border-radius: 7px;
-  background: #fff;
-  color: #111;
+  background: var(--panel-bg);
+  color: var(--ink);
   box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
   font: 14px/1.2 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   cursor: default;
@@ -159,14 +210,14 @@ body {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #111;
+  color: var(--ink);
   cursor: pointer;
   font: inherit;
 }
 
 .spelling-bubble button:hover,
 .spelling-bubble button:focus-visible {
-  background: #f1f3f4;
+  background: var(--panel-hover);
   outline: 0;
 }
 
@@ -176,7 +227,7 @@ body {
 
 .spelling-empty {
   padding: 0 5px;
-  color: #777;
+  color: var(--ink-muted);
 }
 
 .tab-overlay {
@@ -568,8 +619,8 @@ body {
   border: 0;
   outline: 0;
   background: transparent;
-  color: #111;
-  caret-color: #111;
+  color: var(--ink);
+  caret-color: var(--ink);
   cursor: text;
   font: 18px/1.2 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   letter-spacing: 0;
@@ -715,8 +766,8 @@ body {
   position: absolute;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid #d4d8dd;
+  background: var(--md-bg);
+  border: 1px solid var(--md-border);
   border-radius: 8px;
   box-shadow: 0 2px 12px rgb(0 0 0 / 12%);
   overflow: hidden;
@@ -734,9 +785,9 @@ body {
   background: linear-gradient(
     135deg,
     transparent 0 46%,
-    #c2c8cf 46% 58%,
+    var(--md-grip) 46% 58%,
     transparent 58% 70%,
-    #c2c8cf 70% 82%,
+    var(--md-grip) 70% 82%,
     transparent 82%
   );
 }
@@ -745,9 +796,9 @@ body {
   background: linear-gradient(
     135deg,
     transparent 0 46%,
-    #6aa7ff 46% 58%,
+    var(--link) 46% 58%,
     transparent 58% 70%,
-    #6aa7ff 70% 82%,
+    var(--link) 70% 82%,
     transparent 82%
   );
 }
@@ -756,8 +807,8 @@ body {
   display: flex;
   gap: 2px;
   padding: 5px 6px;
-  background: #f1f3f5;
-  border-bottom: 1px solid #e4e8ec;
+  background: var(--md-surface);
+  border-bottom: 1px solid var(--md-surface-border);
   cursor: grab;
 }
 
@@ -766,14 +817,14 @@ body {
   padding: 3px 11px;
   border-radius: 5px;
   background: transparent;
-  color: #6b747d;
+  color: var(--md-tab-ink);
   font: 600 11px/1 "Segoe UI", system-ui, sans-serif;
   cursor: pointer;
 }
 
 .md-tab.is-active {
-  background: #fff;
-  color: #1f2933;
+  background: var(--md-bg);
+  color: var(--md-heading);
   box-shadow: 0 1px 3px rgb(0 0 0 / 14%);
 }
 
@@ -782,13 +833,13 @@ body {
   min-height: 0;
   padding: 12px 16px;
   overflow: auto;
-  color: #222;
+  color: var(--md-ink);
 }
 
 .markdown-note[data-md-mode="source"] .md-body {
   white-space: pre-wrap;
   font: 13px/1.55 "Cascadia Mono", Consolas, monospace;
-  color: #2b3138;
+  color: var(--md-source-ink);
 }
 
 .md-body h1,
@@ -797,7 +848,7 @@ body {
 .md-body h4 {
   margin: 0.7em 0 0.35em;
   line-height: 1.25;
-  color: #1f2933;
+  color: var(--md-heading);
 }
 
 .md-body h1 {
@@ -832,13 +883,13 @@ body {
 .md-body code {
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 0.9em;
-  background: #f1f3f5;
+  background: var(--md-surface);
   padding: 1px 4px;
   border-radius: 3px;
 }
 
 .md-body pre {
-  background: #f1f3f5;
+  background: var(--md-surface);
   padding: 10px 12px;
   border-radius: 6px;
   overflow: auto;
@@ -852,8 +903,8 @@ body {
 .md-body blockquote {
   margin: 0.5em 0;
   padding-left: 12px;
-  border-left: 3px solid #c7ccd1;
-  color: #5a636c;
+  border-left: 3px solid var(--md-quote-border);
+  color: var(--md-quote-ink);
 }
 
 .md-body table {
@@ -864,22 +915,22 @@ body {
 
 .md-body th,
 .md-body td {
-  border: 1px solid #d4d8dd;
+  border: 1px solid var(--md-border);
   padding: 4px 8px;
   text-align: left;
 }
 
 .md-body th {
-  background: #f1f3f5;
+  background: var(--md-surface);
 }
 
 .md-body a {
-  color: #3478f6;
+  color: var(--link);
 }
 
 .md-body hr {
   border: 0;
-  border-top: 1px solid #e4e8ec;
+  border-top: 1px solid var(--md-surface-border);
   margin: 0.8em 0;
 }
 
@@ -898,7 +949,7 @@ body {
 
 .note::selection,
 .note *::selection {
-  background: #cfe3ff;
+  background: var(--note-selection);
 }
 
 .server-error {
@@ -911,6 +962,6 @@ body {
   text-align: center;
   font-size: 15px;
   line-height: 1.5;
-  color: #8a4b2d;
-  background: #fff;
+  color: var(--error-ink);
+  background: var(--canvas-bg);
 }

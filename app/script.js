@@ -17,6 +17,7 @@
   const legacyV811BoardStorageKey = "infinite-paper:v8.1.1:board";
   const legacyBoardStorageKey = "infinite-paper:v8.1:board";
   const redlineSettingsKey = `${appStoragePrefix}:redlines-enabled`;
+  const themeSettingKey = `${appStoragePrefix}:theme`;
   const tabOverlayPositionKey = `${appStoragePrefix}:tab-overlay-position`;
   const boardOverlayStateKey = `${appStoragePrefix}:board-overlay-open`;
   const syncChannelName = `${appStoragePrefix}:sync`;
@@ -67,6 +68,7 @@
   let activeTabOverlayDrag = null;
   let suppressNextTabOverlayClick = false;
   let redlinesEnabled = loadRedlinesEnabled();
+  let themeSetting = loadThemeSetting(); // "light" | "dark" | "" = follow OS
   let tabTitle = defaultDocumentTitle;
   let view = {
     x: Math.round(window.innerWidth / 2),
@@ -715,11 +717,58 @@
       return;
     }
     const toggle = tabOverlay.querySelector("[data-action='toggle-redlines']");
-    if (!toggle) {
-      return;
+    if (toggle) {
+      toggle.textContent = redlinesEnabled ? "Redlines On" : "Redlines Off";
+      toggle.setAttribute("aria-pressed", redlinesEnabled ? "true" : "false");
     }
-    toggle.textContent = redlinesEnabled ? "Redlines On" : "Redlines Off";
-    toggle.setAttribute("aria-pressed", redlinesEnabled ? "true" : "false");
+    const themeToggle = tabOverlay.querySelector("[data-action='toggle-theme']");
+    if (themeToggle) {
+      const dark = effectiveTheme() === "dark";
+      themeToggle.textContent = dark ? "Dark Mode" : "Light Mode";
+      themeToggle.setAttribute("aria-pressed", dark ? "true" : "false");
+    }
+  }
+
+  function loadThemeSetting() {
+    try {
+      const value = localStorage.getItem(themeSettingKey);
+      return value === "light" || value === "dark" ? value : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function saveThemeSetting() {
+    try {
+      if (themeSetting) {
+        localStorage.setItem(themeSettingKey, themeSetting);
+      } else {
+        localStorage.removeItem(themeSettingKey);
+      }
+    } catch {
+      // Settings are optional; keep working if storage is unavailable.
+    }
+  }
+
+  function effectiveTheme() {
+    if (themeSetting) {
+      return themeSetting;
+    }
+    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+      ? "dark"
+      : "light";
+  }
+
+  function applyThemeSetting() {
+    document.documentElement.dataset.theme = effectiveTheme();
+    syncTabOverlayState();
+  }
+
+  function toggleThemeSetting() {
+    themeSetting = effectiveTheme() === "dark" ? "light" : "dark";
+    saveThemeSetting();
+    applyThemeSetting();
+    showPasteStatus(themeSetting === "dark" ? "Dark mode" : "Light mode");
   }
 
   function applyRedlineSetting() {
@@ -927,6 +976,14 @@
       applyRedlineSetting();
     });
     tabOverlay.appendChild(toggleRedlines);
+
+    const toggleTheme = document.createElement("button");
+    toggleTheme.type = "button";
+    toggleTheme.dataset.action = "toggle-theme";
+    toggleTheme.addEventListener("click", () => {
+      toggleThemeSetting();
+    });
+    tabOverlay.appendChild(toggleTheme);
 
     document.body.appendChild(tabOverlay);
     syncTabOverlayState();
@@ -5493,6 +5550,14 @@
   });
 
   void (async function startInfinitePaper() {
+    applyThemeSetting();
+    window
+      .matchMedia?.("(prefers-color-scheme: dark)")
+      ?.addEventListener?.("change", () => {
+        if (!themeSetting) {
+          applyThemeSetting(); // no explicit choice — follow the OS live
+        }
+      });
     const ready = await loadState();
     if (!ready) {
       return;

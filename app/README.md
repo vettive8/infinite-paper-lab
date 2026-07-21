@@ -64,6 +64,9 @@ time you open their board in the browser that originally held them.)
 - **Markdown notes:** drop a `.md` file onto the canvas → rendered document with
   Preview / Markdown tabs; resize via the corner grip; scroll the document
   inside it; drag its body to move it.
+- **Light / dark mode:** follows your OS setting by default; toggle it
+  explicitly from the `Tab` overlay (next to the Redlines toggle). The choice
+  is remembered per browser.
 - **Other:** Find (`Ctrl`+`F`), tab-title rename (`Tab`), copy/paste notes,
   unbounded undo/redo (`Ctrl`+`Z` / `Ctrl`+`Y`), and redline spell suggestions.
 
