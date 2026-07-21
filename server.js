@@ -27,6 +27,7 @@ const NOTES_DIR =
   process.env.NOTES_DIR || "C:\\DevelopmentNotes\\InfinitePaper-Notes";
 const BOARDS_DIR = path.join(NOTES_DIR, "boards");
 const ATTACHMENTS_DIR = path.join(NOTES_DIR, "attachments");
+const TRASH_DIR = path.join(NOTES_DIR, "trash");
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -278,6 +279,31 @@ function fileForBoard(board) {
   return candidate;
 }
 
+/**
+ * Write via a temp file + rename so a crash mid-write can never leave a
+ * half-written board on disk. The temp name has no .md extension, so the
+ * board index and the folder watch skip it.
+ */
+async function writeFileAtomic(file, content) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fsp.writeFile(tmp, content, "utf8");
+  await fsp.rename(tmp, file);
+}
+
+/** Move a board file to NOTES_DIR/trash instead of destroying it. */
+async function trashBoardFile(file) {
+  await fsp.mkdir(TRASH_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = path.join(TRASH_DIR, `${stamp}-${path.basename(file)}`);
+  try {
+    await fsp.rename(file, target);
+  } catch {
+    // Cross-device or locked file: fall back to copy + delete.
+    await fsp.copyFile(file, target);
+    await fsp.rm(file, { force: true });
+  }
+}
+
 function isSameBoardFile(file, id) {
   for (const [bid, f] of boardFiles) {
     if (f === file) return bid === id;
@@ -414,7 +440,7 @@ async function handleApi(req, res, pathname) {
       board.updatedAt = now;
       board.lastOpenedAt = now;
       const file = fileForBoard(board);
-      await fsp.writeFile(file, serializeBoard(board), "utf8");
+      await writeFileAtomic(file, serializeBoard(board));
       boardFiles.set(board.id, file);
       return sendJson(res, 200, { board });
     } catch (err) {
@@ -444,7 +470,7 @@ async function handleApi(req, res, pathname) {
     if (req.method === "DELETE") {
       const file = boardFiles.get(id);
       if (file) {
-        await fsp.rm(file, { force: true });
+        await trashBoardFile(file);
         boardFiles.delete(id);
         broadcastBoardsChanged();
       }
@@ -558,11 +584,13 @@ async function saveBoard(req, res, idFromPath) {
         unchanged = false;
       }
     }
+    // On a rename, write the new file before removing the old one, so a
+    // crash in between duplicates the board instead of losing it.
+    if (!unchanged) {
+      await writeFileAtomic(file, content);
+    }
     if (previous && previous !== file) {
       await fsp.rm(previous, { force: true });
-    }
-    if (!unchanged) {
-      await fsp.writeFile(file, content, "utf8");
     }
     boardFiles.set(board.id, file);
     return sendJson(res, 200, {
