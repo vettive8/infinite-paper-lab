@@ -570,6 +570,21 @@ async function saveBoard(req, res, idFromPath) {
         base = null;
       }
     }
+    // Optimistic concurrency: the client sends baseRevision — the revision
+    // it last loaded/synced. If the file has moved *past* that (another tab
+    // or an API client wrote meanwhile), reject with the current board so
+    // the caller can reload instead of silently overwriting the newer save.
+    // A disk revision *behind* baseRevision (e.g. a lost earlier save) is
+    // not a conflict — the incoming copy is the fresher one.
+    const baseRevision = Number(incoming.baseRevision);
+    if (
+      base &&
+      Number.isFinite(baseRevision) &&
+      Number(base.revision) > baseRevision
+    ) {
+      return sendJson(res, 409, { error: "revision conflict", board: base });
+    }
+
     const board = mergeBoard(base, incoming);
     const file = fileForBoard(board);
     const content = serializeBoard(board);

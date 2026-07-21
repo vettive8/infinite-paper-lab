@@ -188,7 +188,11 @@
         const payload = boardWriteQueue.get(boardId);
         boardWriteQueue.delete(boardId);
         try {
-          await putBoard(payload);
+          const response = await putBoard(payload);
+          if (response.status === 409) {
+            const data = await response.json().catch(() => null);
+            handleSaveConflict(data?.board);
+          }
         } catch (error) {
           console.error("Infinite Paper: board save failed", error);
         }
@@ -466,6 +470,7 @@
     }
     pendingNoteSave = false;
     syncNotesFromDom();
+    const baseRevision = boardRevision;
     const revision = nextRevision();
     const cleaned = cleanNotes(notes);
     const state = {
@@ -479,6 +484,7 @@
     const payload = {
       id: currentBoardId,
       revision,
+      baseRevision,
       view: { ...view },
       notes: cleaned,
     };
@@ -578,6 +584,28 @@
     boardRevision = Number(incoming.revision) || boardRevision;
     pruneSelectedNotes();
     renderSyncedNotes();
+    if (!findBar.hidden) {
+      refreshFindMatches();
+    }
+  }
+
+  // A save came back 409: the board file moved past the revision this tab
+  // last synced (another tab or an API client wrote meanwhile). Adopt the
+  // newer server copy — renderSyncedNotes never resets the focused note, so
+  // text being typed here survives and is re-saved on top.
+  function handleSaveConflict(serverBoard) {
+    if (!serverBoard || serverBoard.id !== currentBoardId) {
+      return;
+    }
+    boardRevision = Number(serverBoard.revision) || boardRevision;
+    const incomingNotes = normalizeNotes(serverBoard.notes);
+    if (notesSignature(incomingNotes) === notesSignature(notes)) {
+      return; // same content — just adopt the newer revision
+    }
+    notes = incomingNotes;
+    pruneSelectedNotes();
+    renderSyncedNotes();
+    showPasteStatus("Board changed elsewhere — reloaded the newer copy", true);
     if (!findBar.hidden) {
       refreshFindMatches();
     }
