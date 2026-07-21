@@ -13,7 +13,7 @@ dependency-free (plain HTML/CSS/JS + a zero-dependency Node server).
 Open a terminal **in the repo folder** and start the server:
 
 ```
-cd /d C:\DevelopmentNotes\InfinitePaper
+cd /d C:\C\InfiniteBoards
 node server.js
 ```
 
