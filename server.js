@@ -16,6 +16,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import url from "node:url";
+import os from "node:os";
 import crypto from "node:crypto";
 
 import { slugify, serializeBoard, parseBoard } from "./lib/board-format.js";
@@ -25,8 +26,14 @@ const APP_DIR = path.join(ROOT, "app");
 
 const PORT = Number(process.env.PORT) || 4321;
 const HOST = process.env.HOST || "127.0.0.1";
+// Default notes location: the legacy Windows path if it already holds
+// notes, otherwise a folder in the user's home directory (cross-platform).
+const LEGACY_NOTES_DIR = "C:\\DevelopmentNotes\\InfinitePaper-Notes";
 const NOTES_DIR =
-  process.env.NOTES_DIR || "C:\\DevelopmentNotes\\InfinitePaper-Notes";
+  process.env.NOTES_DIR ||
+  (fs.existsSync(LEGACY_NOTES_DIR)
+    ? LEGACY_NOTES_DIR
+    : path.join(os.homedir(), "InfinitePaper-Notes"));
 const BOARDS_DIR = path.join(NOTES_DIR, "boards");
 const ATTACHMENTS_DIR = path.join(NOTES_DIR, "attachments");
 const TRASH_DIR = path.join(NOTES_DIR, "trash");
@@ -441,7 +448,7 @@ async function serveStatic(req, res, pathname) {
   if (rel === "/" || rel === "") rel = "/index.html";
 
   const target = path.join(baseDir, path.normalize(rel));
-  if (!target.startsWith(baseDir)) {
+  if (!target.startsWith(baseDir + path.sep)) {
     res.writeHead(403).end("forbidden");
     return;
   }

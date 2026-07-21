@@ -29,7 +29,7 @@ Then open **http://127.0.0.1:4321**.
 |-----|---------|--------------|
 | `PORT` | `4321` | Port the server listens on |
 | `HOST` | `127.0.0.1` | Host to bind to |
-| `NOTES_DIR` | `C:\DevelopmentNotes\InfinitePaper-Notes` | Where boards are stored |
+| `NOTES_DIR` | legacy `C:\DevelopmentNotes\InfinitePaper-Notes` if it exists, else `<home>\InfinitePaper-Notes` | Where boards are stored |
 
 Run a second isolated instance (own port + own notes):
 

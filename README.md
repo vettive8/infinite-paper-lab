@@ -25,8 +25,9 @@ node server.js        (or: npm start, or start.bat)
 ```
 
 Then open http://127.0.0.1:4321. Boards are stored as `.md` files in the
-notes directory — set by `NOTES_DIR`, default
-`C:\DevelopmentNotes\InfinitePaper-Notes`.
+notes directory — set by `NOTES_DIR`; by default the legacy
+`C:\DevelopmentNotes\InfinitePaper-Notes` if it exists, otherwise
+`InfinitePaper-Notes` in your home directory.
 
 ## What it does
 
