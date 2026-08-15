@@ -681,9 +681,43 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("right-click can open a board in a new browser tab", async () => {
+    const row = page
+      .locator(".board-row")
+      .filter({ hasText: "Renamed Board" })
+      .first();
+    const boardId = await row.getAttribute("data-board-id");
+    expect(Boolean(boardId), "the renamed board row has no board id");
+
+    await row.locator(".board-select").click({ button: "right" });
+    await page.waitForSelector(".board-context-menu", { timeout: 4000 });
+    const openItem = page
+      .locator(".board-context-item")
+      .filter({ hasText: "Open in new tab" });
+    expect((await openItem.count()) === 1, "the new-tab menu item is missing");
+
+    const popupPromise = page.context().waitForEvent("page", { timeout: 8000 });
+    await openItem.click();
+    const popup = await popupPromise;
+    await popup.waitForLoadState("domcontentloaded");
+    expect(
+      new URL(popup.url()).searchParams.get("board") === boardId,
+      `the new tab did not target board ${boardId}: ${popup.url()}`
+    );
+    await popup.waitForSelector("#paper", { timeout: 8000 });
+    await popup.close();
+    expect(
+      (await page.locator(".board-overlay:not([hidden])").count()) === 1,
+      "opening a board tab changed the current tab"
+    );
+  });
+
   await step("deleting a board moves its .md to trash (recoverable)", async () => {
     const trashDir = path.join(TEST_NOTES, "trash");
-    const before = boardFiles().length;
+    const renamedFile = boardFiles().find((file) =>
+      file.endsWith("renamed-board.md")
+    );
+    expect(Boolean(renamedFile), "renamed-board.md is missing before deletion");
 
     page.once("dialog", (dialog) => dialog.accept()); // first-delete confirm
     const row = page
@@ -695,7 +729,7 @@ export async function run({ page, step, expect, config }) {
     await page.locator(".board-context-item.is-danger").click();
 
     await waitFor(
-      () => boardFiles().length === before - 1,
+      () => !fs.existsSync(renamedFile),
       6000,
       "the board file to leave boards/"
     );
