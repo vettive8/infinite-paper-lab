@@ -2285,11 +2285,7 @@
     paper.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
   }
 
-  function announceViewScale() {
-    showPasteStatus(`Zoom ${Math.round(view.scale * 100)}%`);
-  }
-
-  function setViewScale(nextScale, clientX, clientY, announce = true) {
+  function setViewScale(nextScale, clientX, clientY) {
     const scale = clamp(Number(nextScale) || 1, minViewScale, maxViewScale);
     const point = viewportToWorld(clientX, clientY);
     view.scale = scale;
@@ -2298,18 +2294,14 @@
     applyView();
     syncTabOverlayState();
     saveViewSoon();
-    if (announce) {
-      announceViewScale();
-    }
   }
 
-  function setViewScaleAtCenter(nextScale, announce = true) {
+  function setViewScaleAtCenter(nextScale) {
     const rect = viewport.getBoundingClientRect();
     setViewScale(
       nextScale,
       rect.left + rect.width / 2,
-      rect.top + rect.height / 2,
-      announce
+      rect.top + rect.height / 2
     );
   }
 
@@ -2324,7 +2316,6 @@
       applyView();
       syncTabOverlayState();
       saveViewSoon();
-      announceViewScale();
       return;
     }
 
@@ -2355,7 +2346,6 @@
     applyView();
     syncTabOverlayState();
     saveViewSoon();
-    announceViewScale();
   }
 
   function viewportToWorld(clientX, clientY) {

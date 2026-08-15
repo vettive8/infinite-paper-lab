@@ -771,6 +771,14 @@ export async function run({ page, step, expect, config }) {
       (await page.evaluate(() => window.innerWidth)) === browserWidth,
       "Ctrl+- changed Chrome zoom instead of canvas zoom"
     );
+    expect(
+      !(await page.locator("#paste-status").evaluateAll((statuses) =>
+        statuses.some(
+          (status) => !status.hidden && /^Zoom\s+\d+%$/.test(status.textContent || "")
+        )
+      )),
+      "canvas zoom displayed a bottom-right percentage notification"
+    );
 
     for (let i = 0; i < 30; i += 1) {
       await page.keyboard.press("Control+=");
