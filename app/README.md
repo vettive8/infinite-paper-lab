@@ -51,7 +51,10 @@ time you open their board in the browser that originally held them.)
 ## Features
 
 - **Canvas:** click empty space to place a text note; drag (or hold Space) to
-  pan; `Ctrl`+wheel to zoom.
+  pan. Canvas zoom runs from **5% to 400%** via touchpad pinch,
+  `Ctrl`+wheel, `Ctrl`+`-` / `Ctrl`+`+`, or the `−` / percentage / `+`
+  controls in the `Tab` overlay. `Ctrl`+`0` resets to 100%; **Fit** frames
+  every note.
 - **Boards** (`Shift`+`Tab` opens the overlay): switch, pin/unpin, reorder
   (hold + drag), rename (double-click or `F2`), delete (right-click → *Delete
   board*, or highlight + `Delete`). Arrow keys navigate, `Shift`+arrows

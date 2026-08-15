@@ -38,6 +38,9 @@ On the canvas you can:
 - Place **text notes** (click), paste **screenshots** (resize / rotate /
   mirror / crop), and drop **`.md` files** that render as formatted markdown
   documents (resizable, scrollable, with a raw-source tab).
+- Zoom the canvas from **5% to 400%** with touchpad pinch, `Ctrl`+wheel,
+  `Ctrl`+`-` / `Ctrl`+`+`, or the controls in the `Tab` overlay. **Fit** frames
+  every note without shrinking the application UI or its image sources.
 - Manage **boards** from the `Shift`+`Tab` overlay: switch, pin, reorder
   (drag), rename, and delete (right-click, or keyboard `Delete` with
   `Shift`+arrow multi-select). Arrow keys navigate, `Enter` opens.

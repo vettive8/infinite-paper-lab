@@ -28,6 +28,10 @@
   const snapDistance = 8;
   const pastedImageMaxWidth = 760;
   const pastedImageMaxHeight = 540;
+  const minViewScale = 0.05;
+  const maxViewScale = 4;
+  const zoomStep = 1.25;
+  const fitBoardPadding = 72;
   const clientId = makeId();
   const syncChannel = "BroadcastChannel" in window ? new BroadcastChannel(syncChannelName) : null;
   const spellService = window.createInfinitePaperSpellService(
@@ -255,7 +259,7 @@
         view = {
           x: savedView.x,
           y: savedView.y,
-          scale: clamp(Number(savedView.scale) || 1, 0.45, 2.4),
+          scale: clamp(Number(savedView.scale) || 1, minViewScale, maxViewScale),
         };
         return;
       }
@@ -271,7 +275,7 @@
       view = {
         x: Number(fallbackView.x),
         y: Number(fallbackView.y),
-        scale: clamp(Number(fallbackView.scale) || 1, 0.45, 2.4),
+        scale: clamp(Number(fallbackView.scale) || 1, minViewScale, maxViewScale),
       };
       return;
     }
@@ -727,6 +731,19 @@
       themeToggle.textContent = dark ? "Dark Mode" : "Light Mode";
       themeToggle.setAttribute("aria-pressed", dark ? "true" : "false");
     }
+    const zoomValue = tabOverlay.querySelector("[data-action='zoom-reset']");
+    if (zoomValue) {
+      zoomValue.textContent = `${Math.round(view.scale * 100)}%`;
+      zoomValue.title = "Reset canvas zoom to 100% (Ctrl+0)";
+    }
+    const zoomOut = tabOverlay.querySelector("[data-action='zoom-out']");
+    if (zoomOut) {
+      zoomOut.disabled = view.scale <= minViewScale;
+    }
+    const zoomIn = tabOverlay.querySelector("[data-action='zoom-in']");
+    if (zoomIn) {
+      zoomIn.disabled = view.scale >= maxViewScale;
+    }
   }
 
   function loadThemeSetting() {
@@ -984,6 +1001,43 @@
       toggleThemeSetting();
     });
     tabOverlay.appendChild(toggleTheme);
+
+    const zoomControls = document.createElement("div");
+    zoomControls.className = "tab-zoom-controls";
+    zoomControls.setAttribute("aria-label", "Canvas zoom");
+
+    const zoomOut = document.createElement("button");
+    zoomOut.type = "button";
+    zoomOut.dataset.action = "zoom-out";
+    zoomOut.textContent = "−";
+    zoomOut.title = "Zoom out (Ctrl+-)";
+    zoomOut.setAttribute("aria-label", "Zoom out");
+    zoomOut.addEventListener("click", () => zoomViewBy(1 / zoomStep));
+
+    const zoomReset = document.createElement("button");
+    zoomReset.type = "button";
+    zoomReset.dataset.action = "zoom-reset";
+    zoomReset.title = "Reset canvas zoom to 100% (Ctrl+0)";
+    zoomReset.setAttribute("aria-label", "Reset canvas zoom to 100%");
+    zoomReset.addEventListener("click", () => setViewScaleAtCenter(1));
+
+    const zoomIn = document.createElement("button");
+    zoomIn.type = "button";
+    zoomIn.dataset.action = "zoom-in";
+    zoomIn.textContent = "+";
+    zoomIn.title = "Zoom in (Ctrl++)";
+    zoomIn.setAttribute("aria-label", "Zoom in");
+    zoomIn.addEventListener("click", () => zoomViewBy(zoomStep));
+
+    const fitBoard = document.createElement("button");
+    fitBoard.type = "button";
+    fitBoard.dataset.action = "zoom-fit";
+    fitBoard.textContent = "Fit";
+    fitBoard.title = "Fit all notes in the window";
+    fitBoard.addEventListener("click", fitBoardToViewport);
+
+    zoomControls.append(zoomOut, zoomReset, zoomIn, fitBoard);
+    tabOverlay.appendChild(zoomControls);
 
     document.body.appendChild(tabOverlay);
     syncTabOverlayState();
@@ -2229,6 +2283,79 @@
 
   function applyView() {
     paper.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  }
+
+  function announceViewScale() {
+    showPasteStatus(`Zoom ${Math.round(view.scale * 100)}%`);
+  }
+
+  function setViewScale(nextScale, clientX, clientY, announce = true) {
+    const scale = clamp(Number(nextScale) || 1, minViewScale, maxViewScale);
+    const point = viewportToWorld(clientX, clientY);
+    view.scale = scale;
+    view.x = clientX - point.x * scale;
+    view.y = clientY - point.y * scale;
+    applyView();
+    syncTabOverlayState();
+    saveViewSoon();
+    if (announce) {
+      announceViewScale();
+    }
+  }
+
+  function setViewScaleAtCenter(nextScale, announce = true) {
+    const rect = viewport.getBoundingClientRect();
+    setViewScale(
+      nextScale,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+      announce
+    );
+  }
+
+  function zoomViewBy(factor) {
+    setViewScaleAtCenter(view.scale * factor);
+  }
+
+  function fitBoardToViewport() {
+    const items = [...paper.querySelectorAll(".board-item")];
+    if (!items.length) {
+      view = centeredView();
+      applyView();
+      syncTabOverlayState();
+      saveViewSoon();
+      announceViewScale();
+      return;
+    }
+
+    const viewportRect = viewport.getBoundingClientRect();
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const item of items) {
+      const rect = item.getBoundingClientRect();
+      minX = Math.min(minX, (rect.left - viewportRect.left - view.x) / view.scale);
+      minY = Math.min(minY, (rect.top - viewportRect.top - view.y) / view.scale);
+      maxX = Math.max(maxX, (rect.right - viewportRect.left - view.x) / view.scale);
+      maxY = Math.max(maxY, (rect.bottom - viewportRect.top - view.y) / view.scale);
+    }
+
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const availableWidth = Math.max(1, viewportRect.width - fitBoardPadding * 2);
+    const availableHeight = Math.max(1, viewportRect.height - fitBoardPadding * 2);
+    view.scale = clamp(
+      Math.min(availableWidth / width, availableHeight / height),
+      minViewScale,
+      maxViewScale
+    );
+    view.x = viewportRect.width / 2 - ((minX + maxX) / 2) * view.scale;
+    view.y = viewportRect.height / 2 - ((minY + maxY) / 2) * view.scale;
+    applyView();
+    syncTabOverlayState();
+    saveViewSoon();
+    announceViewScale();
   }
 
   function viewportToWorld(clientX, clientY) {
@@ -5233,22 +5360,44 @@
     (event) => {
       event.preventDefault();
       if (event.ctrlKey || event.metaKey) {
-        const point = viewportToWorld(event.clientX, event.clientY);
-        const nextScale = clamp(view.scale * Math.exp(-event.deltaY * 0.001), 0.45, 2.4);
-        view.scale = nextScale;
-        view.x = event.clientX - point.x * view.scale;
-        view.y = event.clientY - point.y * view.scale;
+        setViewScale(
+          view.scale * Math.exp(-event.deltaY * 0.001),
+          event.clientX,
+          event.clientY
+        );
       } else {
         view.x -= event.deltaX;
         view.y -= event.deltaY;
+        applyView();
+        saveViewSoon();
       }
-      applyView();
-      saveViewSoon();
     },
     { passive: false }
   );
 
   window.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (event.key === "-" || event.code === "NumpadSubtract") {
+        event.preventDefault();
+        zoomViewBy(1 / zoomStep);
+        return;
+      }
+      if (
+        event.key === "+" ||
+        event.key === "=" ||
+        event.code === "NumpadAdd"
+      ) {
+        event.preventDefault();
+        zoomViewBy(zoomStep);
+        return;
+      }
+      if (event.key === "0" || event.code === "Numpad0") {
+        event.preventDefault();
+        setViewScaleAtCenter(1);
+        return;
+      }
+    }
+
     if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Tab") {
       if (!findBar.contains(document.activeElement) && !titleBar.contains(document.activeElement)) {
         event.preventDefault();
