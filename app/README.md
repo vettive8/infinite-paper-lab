@@ -72,8 +72,10 @@ time you open their board in the browser that originally held them.)
 - **Light / dark mode:** follows your OS setting by default; toggle it
   explicitly from the `Tab` overlay (next to the Redlines toggle). The choice
   is remembered per browser.
-- **Other:** Find (`Ctrl`+`F`), tab-title rename (`Tab`), copy/paste notes,
-  unbounded undo/redo (`Ctrl`+`Z` / `Ctrl`+`Y`), and redline spell suggestions.
+- **Other:** `Ctrl`+`S` explicitly flushes the current board to disk and confirms
+  it with the local date and time. Find (`Ctrl`+`F`), tab-title rename (`Tab`),
+  copy/paste notes, unbounded undo/redo (`Ctrl`+`Z` / `Ctrl`+`Y`), and redline
+  spell suggestions are also available.
 
 ## Storage
 

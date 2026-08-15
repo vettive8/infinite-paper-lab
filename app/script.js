@@ -173,39 +173,46 @@
   // for the same board. Partial payloads merge here and again on the
   // server, so a notes save and a metadata save never clobber each other.
   const boardWriteQueue = new Map();
-  const boardWriteActive = new Set();
+  const boardWritePromises = new Map();
 
   function queueBoardWrite(payload) {
     if (!payload || !payload.id) {
-      return;
+      return Promise.resolve({ ok: false, error: new Error("Invalid board payload") });
     }
     const merged = { ...(boardWriteQueue.get(payload.id) || {}), ...payload };
     boardWriteQueue.set(payload.id, merged);
-    flushBoardWrites(payload.id);
+    let writePromise = boardWritePromises.get(payload.id);
+    if (!writePromise) {
+      writePromise = flushBoardWrites(payload.id).finally(() => {
+        if (boardWritePromises.get(payload.id) === writePromise) {
+          boardWritePromises.delete(payload.id);
+        }
+      });
+      boardWritePromises.set(payload.id, writePromise);
+    }
+    return writePromise;
   }
 
   async function flushBoardWrites(boardId) {
-    if (boardWriteActive.has(boardId)) {
-      return;
-    }
-    boardWriteActive.add(boardId);
-    try {
-      while (boardWriteQueue.has(boardId)) {
-        const payload = boardWriteQueue.get(boardId);
-        boardWriteQueue.delete(boardId);
-        try {
-          const response = await putBoard(payload);
-          if (response.status === 409) {
-            const data = await response.json().catch(() => null);
-            handleSaveConflict(data?.board);
-          }
-        } catch (error) {
-          console.error("Infinite Paper: board save failed", error);
+    let firstError = null;
+    while (boardWriteQueue.has(boardId)) {
+      const payload = boardWriteQueue.get(boardId);
+      boardWriteQueue.delete(boardId);
+      try {
+        const response = await putBoard(payload);
+        if (response.status === 409) {
+          const data = await response.json().catch(() => null);
+          handleSaveConflict(data?.board);
+          firstError ||= new Error("Board changed elsewhere");
+        } else if (!response.ok) {
+          throw new Error(`Board save failed (${response.status})`);
         }
+      } catch (error) {
+        firstError ||= error;
+        console.error("Infinite Paper: board save failed", error);
       }
-    } finally {
-      boardWriteActive.delete(boardId);
     }
+    return { ok: !firstError, error: firstError };
   }
 
   function boardMetaPayload(board) {
@@ -472,7 +479,7 @@
 
   function saveNotesNow() {
     if (!storageReady) {
-      return;
+      return Promise.resolve({ ok: false, error: new Error("Board storage is not ready") });
     }
     pendingNoteSave = false;
     syncNotesFromDom();
@@ -500,13 +507,32 @@
       Object.assign(payload, boardMetaPayload(board));
       renderBoardOverlayIfVisible();
     }
-    queueBoardWrite(payload);
+    const writePromise = queueBoardWrite(payload);
     syncChannel?.postMessage({ type: "board-updated", state });
     dirtyNoteIds.clear();
+    return writePromise;
   }
 
   function saveViewNow() {
     sessionStorage.setItem(getViewStorageKey(), JSON.stringify(view));
+  }
+
+  function formatLocalSaveTime(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+      date.getHours()
+    )}:${pad(date.getMinutes())}`;
+  }
+
+  async function saveCurrentBoardExplicitly() {
+    window.clearTimeout(noteSaveTimer);
+    const result = await saveNotesNow();
+    saveViewNow();
+    if (result.ok) {
+      showPasteStatus(`Board saved · ${formatLocalSaveTime()}`);
+    } else {
+      showPasteStatus(`Board save failed · ${formatLocalSaveTime()}`, true);
+    }
   }
 
   // --- live reload: pick up external (VS Code / AI) board edits --------
@@ -527,7 +553,7 @@
       pendingNoteSave ||
       isEditingANote() ||
       boardWriteQueue.size > 0 ||
-      boardWriteActive.size > 0
+      boardWritePromises.size > 0
     );
   }
 
@@ -5367,6 +5393,13 @@
 
   window.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (!event.repeat) {
+          void saveCurrentBoardExplicitly();
+        }
+        return;
+      }
       if (event.key === "-" || event.code === "NumpadSubtract") {
         event.preventDefault();
         zoomViewBy(1 / zoomStep);

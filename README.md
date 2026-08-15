@@ -47,6 +47,8 @@ On the canvas you can:
 - Open any board in its **own browser tab** (`+ New board`, `Shift`+`Tab` then
   `N`, middle-click, or right-click → **Open in new tab**) — the URL carries
   `?board=<id>`, so refreshing or sharing a link reopens the same board.
+- Press `Ctrl`+`S` to explicitly flush the current board to disk and receive a
+  short confirmation containing the local date and time.
 
 Boards are saved as Markdown in `NOTES_DIR`; pasted images are stored as files
 under `attachments/`, portable across browsers. Edit a board's `.md`

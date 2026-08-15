@@ -87,6 +87,42 @@ export async function run({ page, step, expect, config }) {
     expect(md.includes("<!-- ip-note"), "the .md file has no note marker");
   });
 
+  await step("Ctrl+S saves the board and confirms the local date and time", async () => {
+    await page.evaluate(() => {
+      window.__ctrlSDefaultPrevented = false;
+      window.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+          window.__ctrlSDefaultPrevented = event.defaultPrevented;
+        }
+      });
+    });
+
+    const explicitSaveText = "ctrl s confirmed board save";
+    await page.locator(".note").first().evaluate((note, text) => {
+      note.textContent = `${note.textContent} ${text}`;
+      note.dispatchEvent(
+        new InputEvent("input", { bubbles: true, inputType: "insertText", data: text })
+      );
+    }, explicitSaveText);
+    await page.keyboard.press("Control+s");
+
+    const status = page.locator("#paste-status");
+    await status.waitFor({ state: "visible", timeout: 5000 });
+    expect(
+      /^Board saved · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(await status.innerText()),
+      `unexpected Ctrl+S confirmation: "${await status.innerText()}"`
+    );
+    expect(
+      (await page.evaluate(() => window.__ctrlSDefaultPrevented)) === true,
+      "Ctrl+S was not prevented from reaching the browser Save Page action"
+    );
+    await waitFor(
+      () => Boolean(fileWithNote(explicitSaveText)),
+      5000,
+      "Ctrl+S content to reach the board .md file"
+    );
+  });
+
   await step("editing the .md on disk live-updates the canvas", async () => {
     const file = fileWithNote("smoke test note alpha");
     expect(Boolean(file), "could not find the board file holding the note");
