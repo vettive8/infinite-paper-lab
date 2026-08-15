@@ -277,6 +277,33 @@ body {
   color: #9ec2ff;
 }
 
+.tab-zoom-controls {
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  border-left: 1px solid #3a3a3a;
+}
+
+.tab-zoom-controls button {
+  min-width: 30px;
+  padding: 0 8px;
+}
+
+.tab-zoom-controls [data-action="zoom-reset"] {
+  min-width: 54px;
+  color: #9ec2ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-zoom-controls button:disabled {
+  color: #666;
+  cursor: default;
+}
+
+.tab-zoom-controls button:disabled:hover {
+  background: transparent;
+}
+
 .board-overlay {
   position: fixed;
   inset: 0;

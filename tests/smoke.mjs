@@ -742,6 +742,97 @@ export async function run({ page, step, expect, config }) {
     await page.waitForTimeout(300);
   });
 
+  await step("canvas zoom reaches 5%–400%, fits notes, and survives reload", async () => {
+    const canvasScale = () =>
+      page.evaluate(() => {
+        const transform = getComputedStyle(document.getElementById("paper")).transform;
+        return transform === "none" ? 1 : new DOMMatrix(transform).a;
+      });
+
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press("Tab");
+    await page.waitForSelector(".tab-overlay:not([hidden])", { timeout: 4000 });
+    await page.locator("[data-action='zoom-reset']").click();
+    expect(Math.abs((await canvasScale()) - 1) < 0.001, "zoom did not reset to 100%");
+
+    const browserWidth = await page.evaluate(() => window.innerWidth);
+    for (let i = 0; i < 20; i += 1) {
+      await page.keyboard.press("Control+-");
+    }
+    expect(
+      Math.abs((await canvasScale()) - 0.05) < 0.001,
+      `zoom did not stop at 5% (found ${await canvasScale()})`
+    );
+    expect(
+      (await page.locator("[data-action='zoom-out']").isDisabled()) === true,
+      "zoom-out control is not disabled at 5%"
+    );
+    expect(
+      (await page.evaluate(() => window.innerWidth)) === browserWidth,
+      "Ctrl+- changed Chrome zoom instead of canvas zoom"
+    );
+    expect(
+      !(await page.locator("#paste-status").evaluateAll((statuses) =>
+        statuses.some(
+          (status) => !status.hidden && /^Zoom\s+\d+%$/.test(status.textContent || "")
+        )
+      )),
+      "canvas zoom displayed a bottom-right percentage notification"
+    );
+
+    for (let i = 0; i < 30; i += 1) {
+      await page.keyboard.press("Control+=");
+    }
+    expect(
+      Math.abs((await canvasScale()) - 4) < 0.001,
+      `zoom did not stop at 400% (found ${await canvasScale()})`
+    );
+    expect(
+      (await page.locator("[data-action='zoom-in']").isDisabled()) === true,
+      "zoom-in control is not disabled at 400%"
+    );
+
+    await page.locator("[data-action='zoom-reset']").click();
+    expect(
+      (await page.locator("[data-action='zoom-reset']").innerText()) === "100%",
+      "zoom percentage control did not return to 100%"
+    );
+    await page.locator("[data-action='zoom-fit']").click();
+    const fittedScale = await canvasScale();
+    expect(
+      fittedScale >= 0.05 && fittedScale <= 4,
+      `Fit produced an invalid scale: ${fittedScale}`
+    );
+    const fittedItems = await page.locator(".board-item").evaluateAll((items) =>
+      items.map((item) => {
+        const rect = item.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+      })
+    );
+    const viewport = page.viewportSize();
+    expect(fittedItems.length > 0, "Fit had no notes to frame");
+    expect(
+      fittedItems.every(
+        (rect) =>
+          rect.left >= 67 &&
+          rect.top >= 67 &&
+          rect.right <= viewport.width - 67 &&
+          rect.bottom <= viewport.height - 67
+      ),
+      `Fit left a note outside the padded viewport: ${JSON.stringify(fittedItems)}`
+    );
+
+    await page.keyboard.press("Control+-");
+    const savedScale = await canvasScale();
+    await page.waitForTimeout(300);
+    await page.reload();
+    await page.waitForSelector("#paper", { timeout: 8000 });
+    expect(
+      Math.abs((await canvasScale()) - savedScale) < 0.001,
+      `zoom did not survive reload (${savedScale} -> ${await canvasScale()})`
+    );
+  });
+
   await step("dark mode toggles from the Tab overlay and survives reload", async () => {
     const theme = () =>
       page.evaluate(() => document.documentElement.dataset.theme || "light");
