@@ -152,6 +152,86 @@ body {
   pointer-events: none;
 }
 
+.paste-status.is-save {
+  width: 286px;
+  padding: 6px;
+  border-color: #343434;
+  border-radius: 8px;
+  background: #171a1b;
+  color: #f3f3f3;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 38%);
+  pointer-events: auto;
+}
+
+.save-status-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.save-status-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 4px;
+}
+
+.save-status-copy strong,
+.save-download-option strong {
+  font-weight: 600;
+}
+
+.save-status-time,
+.save-download-option span {
+  color: #9c9c9c;
+  font-size: 11px;
+}
+
+.save-status-download,
+.save-download-option {
+  appearance: none;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.save-status-download {
+  height: 30px;
+  margin-left: auto;
+  padding: 0 10px;
+  color: #9ec2ff;
+}
+
+.save-status-download:hover,
+.save-status-download:focus-visible,
+.save-download-option:hover,
+.save-download-option:focus-visible {
+  background: #272b2d;
+  outline: 0;
+}
+
+.save-download-choices {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #343434;
+}
+
+.save-download-choices[hidden] {
+  display: none;
+}
+
+.save-download-option {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
 .paste-status.is-error {
   border-color: var(--error-border);
   color: var(--error-ink);

@@ -173,39 +173,46 @@
   // for the same board. Partial payloads merge here and again on the
   // server, so a notes save and a metadata save never clobber each other.
   const boardWriteQueue = new Map();
-  const boardWriteActive = new Set();
+  const boardWritePromises = new Map();
 
   function queueBoardWrite(payload) {
     if (!payload || !payload.id) {
-      return;
+      return Promise.resolve({ ok: false, error: new Error("Invalid board payload") });
     }
     const merged = { ...(boardWriteQueue.get(payload.id) || {}), ...payload };
     boardWriteQueue.set(payload.id, merged);
-    flushBoardWrites(payload.id);
+    let writePromise = boardWritePromises.get(payload.id);
+    if (!writePromise) {
+      writePromise = flushBoardWrites(payload.id).finally(() => {
+        if (boardWritePromises.get(payload.id) === writePromise) {
+          boardWritePromises.delete(payload.id);
+        }
+      });
+      boardWritePromises.set(payload.id, writePromise);
+    }
+    return writePromise;
   }
 
   async function flushBoardWrites(boardId) {
-    if (boardWriteActive.has(boardId)) {
-      return;
-    }
-    boardWriteActive.add(boardId);
-    try {
-      while (boardWriteQueue.has(boardId)) {
-        const payload = boardWriteQueue.get(boardId);
-        boardWriteQueue.delete(boardId);
-        try {
-          const response = await putBoard(payload);
-          if (response.status === 409) {
-            const data = await response.json().catch(() => null);
-            handleSaveConflict(data?.board);
-          }
-        } catch (error) {
-          console.error("Infinite Paper: board save failed", error);
+    let firstError = null;
+    while (boardWriteQueue.has(boardId)) {
+      const payload = boardWriteQueue.get(boardId);
+      boardWriteQueue.delete(boardId);
+      try {
+        const response = await putBoard(payload);
+        if (response.status === 409) {
+          const data = await response.json().catch(() => null);
+          handleSaveConflict(data?.board);
+          firstError ||= new Error("Board changed elsewhere");
+        } else if (!response.ok) {
+          throw new Error(`Board save failed (${response.status})`);
         }
+      } catch (error) {
+        firstError ||= error;
+        console.error("Infinite Paper: board save failed", error);
       }
-    } finally {
-      boardWriteActive.delete(boardId);
     }
+    return { ok: !firstError, error: firstError };
   }
 
   function boardMetaPayload(board) {
@@ -472,7 +479,7 @@
 
   function saveNotesNow() {
     if (!storageReady) {
-      return;
+      return Promise.resolve({ ok: false, error: new Error("Board storage is not ready") });
     }
     pendingNoteSave = false;
     syncNotesFromDom();
@@ -500,13 +507,33 @@
       Object.assign(payload, boardMetaPayload(board));
       renderBoardOverlayIfVisible();
     }
-    queueBoardWrite(payload);
+    const writePromise = queueBoardWrite(payload);
     syncChannel?.postMessage({ type: "board-updated", state });
     dirtyNoteIds.clear();
+    return writePromise;
   }
 
   function saveViewNow() {
     sessionStorage.setItem(getViewStorageKey(), JSON.stringify(view));
+  }
+
+  function formatLocalSaveTime(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+      date.getHours()
+    )}:${pad(date.getMinutes())}`;
+  }
+
+  async function saveCurrentBoardExplicitly() {
+    window.clearTimeout(noteSaveTimer);
+    const savedBoardId = currentBoardId;
+    const result = await saveNotesNow();
+    saveViewNow();
+    if (result.ok) {
+      showSavedStatus(formatLocalSaveTime(), savedBoardId);
+    } else {
+      showPasteStatus(`Board save failed · ${formatLocalSaveTime()}`, true);
+    }
   }
 
   // --- live reload: pick up external (VS Code / AI) board edits --------
@@ -527,7 +554,7 @@
       pendingNoteSave ||
       isEditingANote() ||
       boardWriteQueue.size > 0 ||
-      boardWriteActive.size > 0
+      boardWritePromises.size > 0
     );
   }
 
@@ -2791,22 +2818,117 @@
     return document.activeElement?.classList.contains("note") ? document.activeElement : null;
   }
 
-  function showPasteStatus(message, isError = false) {
+  function getPasteStatus() {
     let status = document.getElementById("paste-status");
     if (!status) {
       status = document.createElement("div");
       status.id = "paste-status";
       status.className = "paste-status";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
       document.body.appendChild(status);
     }
+    return status;
+  }
 
-    status.textContent = message;
-    status.classList.toggle("is-error", isError);
-    status.hidden = false;
+  function schedulePasteStatusHide(delay = 1800) {
     window.clearTimeout(pasteStatusTimer);
     pasteStatusTimer = window.setTimeout(() => {
-      status.hidden = true;
-    }, 1800);
+      const status = document.getElementById("paste-status");
+      if (status) {
+        status.hidden = true;
+      }
+    }, delay);
+  }
+
+  function showPasteStatus(message, isError = false) {
+    const status = getPasteStatus();
+
+    status.textContent = message;
+    status.classList.remove("is-save");
+    status.classList.toggle("is-error", isError);
+    status.hidden = false;
+    schedulePasteStatusHide();
+  }
+
+  function startBoardDownload(format, boardId) {
+    const link = document.createElement("a");
+    link.href = `${apiBase}/api/boards/${encodeURIComponent(
+      boardId
+    )}/download?format=${encodeURIComponent(format)}`;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showPasteStatus(
+      format === "knowledge" ? "Knowledge document download started" : "Board source download started"
+    );
+  }
+
+  function showSavedStatus(savedAt, savedBoardId) {
+    const status = getPasteStatus();
+    status.replaceChildren();
+    status.classList.remove("is-error");
+    status.classList.add("is-save");
+
+    const summary = document.createElement("div");
+    summary.className = "save-status-summary";
+
+    const copy = document.createElement("span");
+    copy.className = "save-status-copy";
+    const label = document.createElement("strong");
+    label.textContent = "Board saved";
+    const time = document.createElement("span");
+    time.className = "save-status-time";
+    time.textContent = savedAt;
+    copy.append(label, time);
+
+    const download = document.createElement("button");
+    download.type = "button";
+    download.className = "save-status-download";
+    download.textContent = "Download";
+    download.setAttribute("aria-expanded", "false");
+
+    const choices = document.createElement("div");
+    choices.className = "save-download-choices";
+    choices.hidden = true;
+
+    const formats = [
+      {
+        id: "board",
+        title: "Board source (.md)",
+        detail: "Canvas layout + note metadata",
+      },
+      {
+        id: "knowledge",
+        title: "Knowledge document (.md)",
+        detail: "Clean reading copy for people + AI",
+      },
+    ];
+    for (const format of formats) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "save-download-option";
+      option.dataset.downloadFormat = format.id;
+      const optionTitle = document.createElement("strong");
+      optionTitle.textContent = format.title;
+      const optionDetail = document.createElement("span");
+      optionDetail.textContent = format.detail;
+      option.append(optionTitle, optionDetail);
+      option.addEventListener("click", () => startBoardDownload(format.id, savedBoardId));
+      choices.appendChild(option);
+    }
+
+    download.addEventListener("click", () => {
+      choices.hidden = !choices.hidden;
+      download.setAttribute("aria-expanded", String(!choices.hidden));
+      schedulePasteStatusHide(choices.hidden ? 6000 : 10000);
+    });
+
+    summary.append(copy, download);
+    status.append(summary, choices);
+    status.hidden = false;
+    schedulePasteStatusHide(6000);
   }
 
   function isSpellWordCharacter(character) {
@@ -5367,6 +5489,13 @@
 
   window.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (!event.repeat) {
+          void saveCurrentBoardExplicitly();
+        }
+        return;
+      }
       if (event.key === "-" || event.code === "NumpadSubtract") {
         event.preventDefault();
         zoomViewBy(1 / zoomStep);
