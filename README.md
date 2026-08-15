@@ -48,7 +48,10 @@ On the canvas you can:
   `N`, middle-click, or right-click → **Open in new tab**) — the URL carries
   `?board=<id>`, so refreshing or sharing a link reopens the same board.
 - Press `Ctrl`+`S` to explicitly flush the current board to disk and receive a
-  short confirmation containing the local date and time.
+  compact confirmation containing the local date and time. Choose **Download**
+  there for the canonical board source (`.board.md`) or a clean single-file
+  knowledge document (`.knowledge.md`). Image attachment bundling is reserved
+  for a later portable ZIP export.
 
 Boards are saved as Markdown in `NOTES_DIR`; pasted images are stored as files
 under `attachments/`, portable across browsers. Edit a board's `.md`

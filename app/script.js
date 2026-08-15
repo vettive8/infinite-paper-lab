@@ -526,10 +526,11 @@
 
   async function saveCurrentBoardExplicitly() {
     window.clearTimeout(noteSaveTimer);
+    const savedBoardId = currentBoardId;
     const result = await saveNotesNow();
     saveViewNow();
     if (result.ok) {
-      showPasteStatus(`Board saved · ${formatLocalSaveTime()}`);
+      showSavedStatus(formatLocalSaveTime(), savedBoardId);
     } else {
       showPasteStatus(`Board save failed · ${formatLocalSaveTime()}`, true);
     }
@@ -2817,22 +2818,117 @@
     return document.activeElement?.classList.contains("note") ? document.activeElement : null;
   }
 
-  function showPasteStatus(message, isError = false) {
+  function getPasteStatus() {
     let status = document.getElementById("paste-status");
     if (!status) {
       status = document.createElement("div");
       status.id = "paste-status";
       status.className = "paste-status";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
       document.body.appendChild(status);
     }
+    return status;
+  }
 
-    status.textContent = message;
-    status.classList.toggle("is-error", isError);
-    status.hidden = false;
+  function schedulePasteStatusHide(delay = 1800) {
     window.clearTimeout(pasteStatusTimer);
     pasteStatusTimer = window.setTimeout(() => {
-      status.hidden = true;
-    }, 1800);
+      const status = document.getElementById("paste-status");
+      if (status) {
+        status.hidden = true;
+      }
+    }, delay);
+  }
+
+  function showPasteStatus(message, isError = false) {
+    const status = getPasteStatus();
+
+    status.textContent = message;
+    status.classList.remove("is-save");
+    status.classList.toggle("is-error", isError);
+    status.hidden = false;
+    schedulePasteStatusHide();
+  }
+
+  function startBoardDownload(format, boardId) {
+    const link = document.createElement("a");
+    link.href = `${apiBase}/api/boards/${encodeURIComponent(
+      boardId
+    )}/download?format=${encodeURIComponent(format)}`;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showPasteStatus(
+      format === "knowledge" ? "Knowledge document download started" : "Board source download started"
+    );
+  }
+
+  function showSavedStatus(savedAt, savedBoardId) {
+    const status = getPasteStatus();
+    status.replaceChildren();
+    status.classList.remove("is-error");
+    status.classList.add("is-save");
+
+    const summary = document.createElement("div");
+    summary.className = "save-status-summary";
+
+    const copy = document.createElement("span");
+    copy.className = "save-status-copy";
+    const label = document.createElement("strong");
+    label.textContent = "Board saved";
+    const time = document.createElement("span");
+    time.className = "save-status-time";
+    time.textContent = savedAt;
+    copy.append(label, time);
+
+    const download = document.createElement("button");
+    download.type = "button";
+    download.className = "save-status-download";
+    download.textContent = "Download";
+    download.setAttribute("aria-expanded", "false");
+
+    const choices = document.createElement("div");
+    choices.className = "save-download-choices";
+    choices.hidden = true;
+
+    const formats = [
+      {
+        id: "board",
+        title: "Board source (.md)",
+        detail: "Canvas layout + note metadata",
+      },
+      {
+        id: "knowledge",
+        title: "Knowledge document (.md)",
+        detail: "Clean reading copy for people + AI",
+      },
+    ];
+    for (const format of formats) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "save-download-option";
+      option.dataset.downloadFormat = format.id;
+      const optionTitle = document.createElement("strong");
+      optionTitle.textContent = format.title;
+      const optionDetail = document.createElement("span");
+      optionDetail.textContent = format.detail;
+      option.append(optionTitle, optionDetail);
+      option.addEventListener("click", () => startBoardDownload(format.id, savedBoardId));
+      choices.appendChild(option);
+    }
+
+    download.addEventListener("click", () => {
+      choices.hidden = !choices.hidden;
+      download.setAttribute("aria-expanded", String(!choices.hidden));
+      schedulePasteStatusHide(choices.hidden ? 6000 : 10000);
+    });
+
+    summary.append(copy, download);
+    status.append(summary, choices);
+    status.hidden = false;
+    schedulePasteStatusHide(6000);
   }
 
   function isSpellWordCharacter(character) {

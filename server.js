@@ -20,6 +20,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 
 import { slugify, serializeBoard, parseBoard } from "./lib/board-format.js";
+import { serializeKnowledgeMarkdown } from "./lib/knowledge-export.js";
 
 const ROOT = path.dirname(url.fileURLToPath(import.meta.url));
 const APP_DIR = path.join(ROOT, "app");
@@ -142,6 +143,18 @@ function sendJson(res, status, data) {
   res.end(body);
 }
 
+function sendMarkdownDownload(res, filename, content) {
+  const safeName = String(filename || "board.md").replace(/[^a-z0-9._-]/gi, "-");
+  res.writeHead(200, {
+    "Content-Type": "text/markdown; charset=utf-8",
+    "Content-Length": Buffer.byteLength(content),
+    "Content-Disposition": `attachment; filename="${safeName}"`,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(content);
+}
+
 function readBody(req, limit = 64 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -262,6 +275,32 @@ async function handleApi(req, res, pathname) {
       await writeFileAtomic(file, serializeBoard(board));
       boardFiles.set(board.id, file);
       return sendJson(res, 200, { board });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  const boardDownloadMatch = pathname.match(/^\/api\/boards\/([^/]+)\/download$/);
+  if (boardDownloadMatch && req.method === "GET") {
+    const id = decodeURIComponent(boardDownloadMatch[1]);
+    const file = boardFiles.get(id);
+    if (!file) return sendJson(res, 404, { error: "board not found" });
+    const format = new url.URL(req.url, "http://localhost").searchParams.get("format");
+    try {
+      const source = await fsp.readFile(file, "utf8");
+      const board = parseBoard(source);
+      const baseName = slugify(board.title);
+      if (format === "board") {
+        return sendMarkdownDownload(res, `${baseName}.board.md`, source);
+      }
+      if (format === "knowledge") {
+        return sendMarkdownDownload(
+          res,
+          `${baseName}.knowledge.md`,
+          serializeKnowledgeMarkdown(board)
+        );
+      }
+      return sendJson(res, 400, { error: "unknown download format" });
     } catch (err) {
       return sendJson(res, 500, { error: err.message });
     }

@@ -73,9 +73,13 @@ time you open their board in the browser that originally held them.)
   explicitly from the `Tab` overlay (next to the Redlines toggle). The choice
   is remembered per browser.
 - **Other:** `Ctrl`+`S` explicitly flushes the current board to disk and confirms
-  it with the local date and time. Find (`Ctrl`+`F`), tab-title rename (`Tab`),
-  copy/paste notes, unbounded undo/redo (`Ctrl`+`Z` / `Ctrl`+`Y`), and redline
-  spell suggestions are also available.
+  it with the local date and time. Its compact **Download** action offers the
+  canonical board source (`.board.md`, including canvas layout and note
+  metadata) or a clean reading copy (`.knowledge.md`) for people and AI tools.
+  These minimal Markdown exports reference or label images but do not bundle
+  attachment bytes; a portable ZIP package is intentionally deferred. Find
+  (`Ctrl`+`F`), tab-title rename (`Tab`), copy/paste notes, unbounded undo/redo
+  (`Ctrl`+`Z` / `Ctrl`+`Y`), and redline spell suggestions are also available.
 
 ## Storage
 

@@ -109,8 +109,14 @@ export async function run({ page, step, expect, config }) {
     const status = page.locator("#paste-status");
     await status.waitFor({ state: "visible", timeout: 5000 });
     expect(
-      /^Board saved · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(await status.innerText()),
+      (await status.locator(".save-status-copy strong").innerText()) === "Board saved",
       `unexpected Ctrl+S confirmation: "${await status.innerText()}"`
+    );
+    expect(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(
+        await status.locator(".save-status-time").innerText()
+      ),
+      `unexpected save timestamp: "${await status.innerText()}"`
     );
     expect(
       (await page.evaluate(() => window.__ctrlSDefaultPrevented)) === true,
@@ -120,6 +126,61 @@ export async function run({ page, step, expect, config }) {
       () => Boolean(fileWithNote(explicitSaveText)),
       5000,
       "Ctrl+S content to reach the board .md file"
+    );
+
+    await status.locator(".save-status-download").click();
+    expect(
+      (await status.locator(".save-download-option").count()) === 2,
+      "Download did not reveal the two minimal Markdown choices"
+    );
+    expect(
+      await status.locator('[data-download-format="board"]').isVisible(),
+      "Board source download choice is not visible"
+    );
+    expect(
+      await status.locator('[data-download-format="knowledge"]').isVisible(),
+      "Knowledge document download choice is not visible"
+    );
+  });
+
+  await step("Download offers board-source and clean knowledge Markdown", async () => {
+    const status = page.locator("#paste-status");
+    const [boardDownload] = await Promise.all([
+      page.waitForEvent("download"),
+      status.locator('[data-download-format="board"]').click(),
+    ]);
+    const boardDownloadPath = await boardDownload.path();
+    const boardSource = fs.readFileSync(boardDownloadPath, "utf8");
+    expect(
+      boardDownload.suggestedFilename().endsWith(".board.md"),
+      `unexpected board-source filename: ${boardDownload.suggestedFilename()}`
+    );
+    expect(boardSource.includes("<!-- ip-note"), "board-source download lost note markers");
+    expect(
+      boardSource.includes("ctrl s confirmed board save"),
+      "board-source download does not contain the confirmed save"
+    );
+
+    await page.keyboard.press("Control+s");
+    await status.locator(".save-status-download").waitFor({ state: "visible" });
+    await status.locator(".save-status-download").click();
+    const [knowledgeDownload] = await Promise.all([
+      page.waitForEvent("download"),
+      status.locator('[data-download-format="knowledge"]').click(),
+    ]);
+    const knowledgeDownloadPath = await knowledgeDownload.path();
+    const knowledgeSource = fs.readFileSync(knowledgeDownloadPath, "utf8");
+    expect(
+      knowledgeDownload.suggestedFilename().endsWith(".knowledge.md"),
+      `unexpected knowledge filename: ${knowledgeDownload.suggestedFilename()}`
+    );
+    expect(
+      knowledgeSource.includes("ctrl s confirmed board save"),
+      "knowledge download lost the note text"
+    );
+    expect(
+      !knowledgeSource.includes("<!-- ip-note"),
+      "knowledge download leaked InfiniteBoards note markers"
     );
   });
 
