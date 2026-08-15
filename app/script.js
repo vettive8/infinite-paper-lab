@@ -1303,7 +1303,7 @@
       row.dataset.boardId = board.id;
       row.dataset.pinned = board.pinned ? "true" : "false";
       row.classList.toggle("is-current", board.id === currentBoardId);
-      // Right-click a row for the board menu (currently: Delete board).
+      // Right-click a row for board actions, matching a browser tab's menu.
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1716,6 +1716,16 @@
 
     const menu = document.createElement("div");
     menu.className = "board-context-menu";
+
+    const openItem = document.createElement("button");
+    openItem.type = "button";
+    openItem.className = "board-context-item";
+    openItem.textContent = "Open in new tab";
+    openItem.addEventListener("click", () => {
+      closeBoardContextMenu();
+      openBoardInNewTab(boardId);
+    });
+    menu.appendChild(openItem);
 
     const deleteItem = document.createElement("button");
     deleteItem.type = "button";

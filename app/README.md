@@ -57,7 +57,8 @@ time you open their board in the browser that originally held them.)
   board*, or highlight + `Delete`). Arrow keys navigate, `Shift`+arrows
   multi-select, `Enter` opens.
 - **New boards open in their own browser tab** — `+ New board`, or `Shift`+`Tab`
-  then `N`. Middle-click a board to open it in a new tab. The URL carries
+  then `N`. Middle-click a board, or right-click it and choose **Open in new
+  tab**, to open it in a new tab. The URL carries
   `?board=<id>`, so a refresh keeps you on the same board.
 - **Images:** paste a screenshot (`Ctrl`+`V`) → image note; resize, rotate
   (`R`), mirror (`M`), and crop.

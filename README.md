@@ -42,8 +42,8 @@ On the canvas you can:
   (drag), rename, and delete (right-click, or keyboard `Delete` with
   `Shift`+arrow multi-select). Arrow keys navigate, `Enter` opens.
 - Open any board in its **own browser tab** (`+ New board`, `Shift`+`Tab` then
-  `N`, or middle-click) — the URL carries `?board=<id>`, so refreshing or
-  sharing a link reopens the same board.
+  `N`, middle-click, or right-click → **Open in new tab**) — the URL carries
+  `?board=<id>`, so refreshing or sharing a link reopens the same board.
 
 Boards are saved as Markdown in `NOTES_DIR`; pasted images are stored as files
 under `attachments/`, portable across browsers. Edit a board's `.md`
