@@ -20,6 +20,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 
 import { slugify, serializeBoard, parseBoard } from "./lib/board-format.js";
+import { preferBoardIndexCandidate } from "./lib/board-index.js";
 import { serializeKnowledgeMarkdown } from "./lib/knowledge-export.js";
 
 const ROOT = path.dirname(url.fileURLToPath(import.meta.url));
@@ -61,22 +62,50 @@ const CONTENT_TYPES = {
 const boardFiles = new Map();
 
 async function indexBoards() {
-  boardFiles.clear();
   let entries = [];
   try {
     entries = await fsp.readdir(BOARDS_DIR);
   } catch {
     return;
   }
+  const candidatesById = new Map();
+  const duplicateCounts = new Map();
   for (const name of entries) {
     if (!name.endsWith(".md")) continue;
     const file = path.join(BOARDS_DIR, name);
     try {
       const board = parseBoard(await fsp.readFile(file, "utf8"));
-      if (board.id) boardFiles.set(board.id, file);
+      if (!board.id) continue;
+      const current = candidatesById.get(board.id);
+      if (current) {
+        duplicateCounts.set(board.id, (duplicateCounts.get(board.id) || 1) + 1);
+      }
+      candidatesById.set(
+        board.id,
+        preferBoardIndexCandidate(current, { file, board })
+      );
     } catch {
       /* skip unreadable board files */
     }
+  }
+
+  // Build the complete replacement before touching the live map. The old
+  // implementation cleared boardFiles before asynchronous reads; API requests
+  // arriving during that gap believed existing boards were new and created
+  // suffixed duplicate files on every keystroke.
+  boardFiles.clear();
+  for (const [id, candidate] of candidatesById) {
+    boardFiles.set(id, candidate.file);
+  }
+
+  if (duplicateCounts.size) {
+    const extraFiles = [...duplicateCounts.values()].reduce(
+      (total, count) => total + count - 1,
+      0
+    );
+    console.warn(
+      `duplicate board ids detected -> ${duplicateCounts.size} id(s), ${extraFiles} extra file(s); newest revisions selected`
+    );
   }
 }
 
@@ -128,7 +157,15 @@ function isSameBoardFile(file, id) {
   for (const [bid, f] of boardFiles) {
     if (f === file) return bid === id;
   }
-  return false;
+  // The index may intentionally point at a newer suffixed recovery snapshot.
+  // Check the desired canonical file itself before treating its filename as a
+  // collision; otherwise saving the recovered board would create yet another
+  // suffix instead of safely promoting the latest content.
+  try {
+    return parseBoard(fs.readFileSync(file, "utf8")).id === id;
+  } catch {
+    return false;
+  }
 }
 
 // --- request helpers -----------------------------------------------------
