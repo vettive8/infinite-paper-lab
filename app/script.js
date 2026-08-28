@@ -339,23 +339,53 @@
     }
   }
 
+  function createIntroNotes() {
+    return [
+      {
+        id: makeId(), type: "markdown", x: -580, y: -300, width: 460, height: 260,
+        text: [
+          "# Welcome to InfiniteBoards", "", "A spatial Markdown canvas stored as readable files.", "",
+          "- Click empty space to write", "- Paste or drop an image", "- Drop a `.md` file to render it",
+          "- Use `Shift+Tab` to manage boards",
+        ].join("\n"),
+      },
+      {
+        id: makeId(), type: "markdown", x: 120, y: -300, width: 460, height: 260,
+        text: [
+          "# Canvas controls", "", "- Pan: drag empty space", "- Zoom: `Ctrl` + wheel or the board controls",
+          "- Find: `Ctrl+F`", "- Save now: `Ctrl+S`", "- Undo / redo: `Ctrl+Z` / `Ctrl+Y`", "",
+          "Your browser UI stays fixed while the canvas zooms.",
+        ].join("\n"),
+      },
+      {
+        id: makeId(), type: "markdown", x: -580, y: 80, width: 1160, height: 250,
+        text: [
+          "# Watch the complete test tour", "", "From the repository, run:", "", "```bash",
+          "npm install", "npx playwright install chromium", "npm run test:live", "```", "",
+          "A visible browser demonstrates notes, images, Markdown, boards, search, undo, downloads, zoom, and dark mode. `npm run test:all` runs the same coverage headlessly for GitHub Actions.",
+        ].join("\n"),
+      },
+    ];
+  }
+
   async function seedFirstBoard() {
-    const board = createBoardRecord("Main board");
+    const board = createBoardRecord("InfiniteBoards Test Drive");
     const importedNotes = legacyV811Notes();
     if (importedNotes.length) {
       board.title = "Imported v8.1.1";
     }
+    const firstNotes = importedNotes.length ? importedNotes : createIntroNotes();
     boards = [board];
     currentBoardId = board.id;
-    notes = importedNotes;
-    boardRevision = importedNotes.length ? Date.now() : 0;
+    notes = firstNotes;
+    boardRevision = Date.now();
     migratedFromLegacy = importedNotes.length > 0;
     try {
       await putBoard({
         ...boardMetaPayload(board),
         revision: boardRevision,
         view: centeredView(),
-        notes: importedNotes,
+        notes: firstNotes,
       });
     } catch (error) {
       console.error("Infinite Paper: failed to create first board", error);

@@ -20,6 +20,8 @@ versions are tracked by git branch and tag.
 
 ## Run it
 
+Requires Node.js 20 or newer.
+
 ```
 node server.js        (or: npm start, or start.bat)
 ```
@@ -28,6 +30,27 @@ Then open http://127.0.0.1:4321. Boards are stored as `.md` files in the
 notes directory — set by `NOTES_DIR`; by default the legacy
 `C:\DevelopmentNotes\InfinitePaper-Notes` if it exists, otherwise
 `InfinitePaper-Notes` in your home directory.
+
+A new empty notes directory receives exactly one generated board:
+**InfiniteBoards Test Drive**. It is an interactive introduction, not personal
+data. This repository never tracks your boards, attachments, or trash.
+
+## Watch the live browser tutorial
+
+```bash
+npm install
+npx playwright install chromium
+npm run test:live
+```
+
+This opens Chromium and visibly demonstrates the core workflow: text, images,
+Markdown, board management, search, undo/redo, downloads, canvas zoom, and dark
+mode. Traces, screenshots, and video go to `test-results/`.
+
+For the same tour without a visible browser, run `npm run test:browser`.
+`npm run test:all` runs unit and browser tests together. GitHub Actions runs it
+on every pull request and push to `main`; its trace and video are downloadable
+from the workflow run.
 
 ## What it does
 
