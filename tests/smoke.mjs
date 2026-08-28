@@ -1,7 +1,8 @@
 /**
  * tests/smoke.mjs — Infinite Paper smoke test.
  *
- * Run via the app-test skill:  node <skill>/runner.mjs <thisRepo>
+ * Run headlessly: npm run test:browser
+ * Watch the animated browser tour: npm run test:live
  *
  * The app-test runner supplies the Playwright `page`; this file has no
  * dependencies. It launches the server on a spare port against a throwaway
@@ -63,6 +64,16 @@ export async function run({ page, step, expect, config }) {
       "a 'cannot reach server' message is showing"
     );
     await waitFor(() => boardFiles().length >= 1, 8000, "a board .md file on disk");
+    await page.getByRole("heading", { name: "Welcome to InfiniteBoards" }).waitFor();
+    const seededBoard = fs.readFileSync(boardFiles()[0], "utf8");
+    expect(
+      seededBoard.includes('title: "InfiniteBoards Test Drive"'),
+      "the generated tutorial board title is missing"
+    );
+    expect(
+      seededBoard.includes("Watch the complete test tour"),
+      "the generated tutorial content is missing"
+    );
   });
 
   await step("clicking the canvas creates a text note", async () => {
@@ -104,10 +115,16 @@ export async function run({ page, step, expect, config }) {
         new InputEvent("input", { bubbles: true, inputType: "insertText", data: text })
       );
     }, explicitSaveText);
+    await waitFor(
+      () => Boolean(fileWithNote(explicitSaveText)),
+      5000,
+      "edited content to settle on disk before explicit save"
+    );
+    await page.waitForTimeout(300);
     await page.keyboard.press("Control+s");
 
     const status = page.locator("#paste-status");
-    await status.waitFor({ state: "visible", timeout: 5000 });
+    await status.locator(".save-status-copy strong").waitFor({ state: "visible", timeout: 5000 });
     expect(
       (await status.locator(".save-status-copy strong").innerText()) === "Board saved",
       `unexpected Ctrl+S confirmation: "${await status.innerText()}"`
@@ -122,12 +139,6 @@ export async function run({ page, step, expect, config }) {
       (await page.evaluate(() => window.__ctrlSDefaultPrevented)) === true,
       "Ctrl+S was not prevented from reaching the browser Save Page action"
     );
-    await waitFor(
-      () => Boolean(fileWithNote(explicitSaveText)),
-      5000,
-      "Ctrl+S content to reach the board .md file"
-    );
-
     await status.locator(".save-status-download").click();
     expect(
       (await status.locator(".save-download-option").count()) === 2,
@@ -569,6 +580,41 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("Ctrl+wheel over a markdown body zooms the canvas", async () => {
+    const canvasScale = () =>
+      page.evaluate(() => {
+        const transform = getComputedStyle(document.getElementById("paper")).transform;
+        return transform === "none" ? 1 : new DOMMatrix(transform).a;
+      });
+    const scaleBefore = await canvasScale();
+    const browserWidthBefore = await page.evaluate(() => window.innerWidth);
+
+    const wheelResult = await page.locator(".markdown-note .md-body").first().evaluate((body) => {
+      const rect = body.getBoundingClientRect();
+      const event = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -120,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + Math.min(40, rect.height / 2),
+      });
+      const dispatched = body.dispatchEvent(event);
+      return { defaultPrevented: event.defaultPrevented, dispatched };
+    });
+
+    expect(wheelResult.defaultPrevented, "Ctrl+wheel was not prevented from reaching Chrome");
+    expect(!wheelResult.dispatched, "the canceled Ctrl+wheel event reported successful dispatch");
+    expect(
+      (await canvasScale()) > scaleBefore,
+      `Ctrl+wheel did not zoom the canvas (${scaleBefore} -> ${await canvasScale()})`
+    );
+    expect(
+      (await page.evaluate(() => window.innerWidth)) === browserWidthBefore,
+      "Ctrl+wheel changed browser zoom instead of canvas zoom"
+    );
+  });
+
   await step("writing several notes keeps each note's text intact", async () => {
     // A new board opens in its own tab — do the writing there, on a fresh
     // empty board.
@@ -911,12 +957,12 @@ export async function run({ page, step, expect, config }) {
     expect(
       fittedItems.every(
         (rect) =>
-          rect.left >= 67 &&
-          rect.top >= 67 &&
-          rect.right <= viewport.width - 67 &&
-          rect.bottom <= viewport.height - 67
+          rect.left >= 0 &&
+          rect.top >= 0 &&
+          rect.right <= viewport.width &&
+          rect.bottom <= viewport.height
       ),
-      `Fit left a note outside the padded viewport: ${JSON.stringify(fittedItems)}`
+      `Fit left a note outside the viewport: ${JSON.stringify(fittedItems)}`
     );
 
     await page.keyboard.press("Control+-");

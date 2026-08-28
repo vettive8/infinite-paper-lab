@@ -6,9 +6,16 @@
   "description": "Infinite Paper — file-backed markdown note canvas",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/"
+    "test": "npm run test:unit",
+    "test:unit": "node --test tests/",
+    "test:browser": "node tools/run-smoke.mjs",
+    "test:live": "node tools/run-smoke.mjs --headed",
+    "test:all": "npm run test:unit && npm run test:browser"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }
