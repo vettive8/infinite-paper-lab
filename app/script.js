@@ -2518,8 +2518,13 @@
       // Drag moves the note; a plain click does nothing (no select).
       startMarkdownMove(event, noteId);
     });
-    // Wheeling inside the body scrolls the document, not the canvas.
-    body.addEventListener("wheel", (event) => event.stopPropagation());
+    // A plain wheel scrolls the document. Ctrl/Meta+wheel must bubble to the
+    // viewport so InfiniteBoards zooms the canvas and cancels browser zoom.
+    body.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        event.stopPropagation();
+      }
+    });
     body.addEventListener("input", () => {
       if (!body.isContentEditable) {
         return;

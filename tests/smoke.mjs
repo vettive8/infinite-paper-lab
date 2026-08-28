@@ -569,6 +569,41 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("Ctrl+wheel over a markdown body zooms the canvas", async () => {
+    const canvasScale = () =>
+      page.evaluate(() => {
+        const transform = getComputedStyle(document.getElementById("paper")).transform;
+        return transform === "none" ? 1 : new DOMMatrix(transform).a;
+      });
+    const scaleBefore = await canvasScale();
+    const browserWidthBefore = await page.evaluate(() => window.innerWidth);
+
+    const wheelResult = await page.locator(".markdown-note .md-body").first().evaluate((body) => {
+      const rect = body.getBoundingClientRect();
+      const event = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -120,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + Math.min(40, rect.height / 2),
+      });
+      const dispatched = body.dispatchEvent(event);
+      return { defaultPrevented: event.defaultPrevented, dispatched };
+    });
+
+    expect(wheelResult.defaultPrevented, "Ctrl+wheel was not prevented from reaching Chrome");
+    expect(!wheelResult.dispatched, "the canceled Ctrl+wheel event reported successful dispatch");
+    expect(
+      (await canvasScale()) > scaleBefore,
+      `Ctrl+wheel did not zoom the canvas (${scaleBefore} -> ${await canvasScale()})`
+    );
+    expect(
+      (await page.evaluate(() => window.innerWidth)) === browserWidthBefore,
+      "Ctrl+wheel changed browser zoom instead of canvas zoom"
+    );
+  });
+
   await step("writing several notes keeps each note's text intact", async () => {
     // A new board opens in its own tab — do the writing there, on a fresh
     // empty board.
