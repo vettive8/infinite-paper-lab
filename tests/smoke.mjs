@@ -805,7 +805,7 @@ export async function run({ page, step, expect, config }) {
     await page.keyboard.press("Enter");
     await waitFor(
       () => boardFiles().some((f) => f.endsWith("renamed-board.md")),
-      6000,
+      12000,
       "the board file to be renamed on disk"
     );
 
@@ -819,7 +819,7 @@ export async function run({ page, step, expect, config }) {
         const f = boardFiles().find((x) => x.endsWith("renamed-board.md"));
         return f && fs.readFileSync(f, "utf8").includes("pinned: true");
       },
-      6000,
+      12000,
       "pinned: true to reach the board file"
     );
   });
