@@ -52,6 +52,21 @@ For the same tour without a visible browser, run `npm run test:browser`.
 on every pull request and push to `main`; its trace and video are downloadable
 from the workflow run.
 
+To capture release evidence for the board-folder UI, run the previous release
+and current release on separate ports, then use:
+
+```bash
+node tools/capture-folder-comparison.mjs \
+  --before-url http://127.0.0.1:4332/?board=BOARD_ID \
+  --after-url http://127.0.0.1:4321/?board=BOARD_ID \
+  --output-dir ./test-results/folder-comparison \
+  --headed
+```
+
+The observer opens both versions visibly and saves a before screenshot, an
+after screenshot, and a JSON manifest. Keep captures containing personal board
+names in the private notes repository rather than this public app repository.
+
 ## What it does
 
 Each board is one `.md` file on disk — portable, git-trackable, editable in
