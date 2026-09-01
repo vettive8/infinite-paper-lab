@@ -17,6 +17,7 @@ function makeBoard(overrides = {}) {
     id: "11111111-2222-3333-4444-555555555555",
     title: "Test board",
     pinned: false,
+    folder: "",
     order: 3,
     createdAt: 1778836932000,
     updatedAt: 1778836999000,
@@ -33,11 +34,12 @@ function roundTrip(board) {
 }
 
 test("frontmatter metadata round-trips", () => {
-  const board = makeBoard({ pinned: true });
+  const board = makeBoard({ pinned: true, folder: '2026-09-01 / FCAR "Build"' });
   const back = roundTrip(board);
   assert.equal(back.id, board.id);
   assert.equal(back.title, board.title);
   assert.equal(back.pinned, true);
+  assert.equal(back.folder, board.folder);
   assert.equal(back.order, 3);
   assert.equal(back.createdAt, board.createdAt);
   assert.equal(back.updatedAt, board.updatedAt);
@@ -204,6 +206,7 @@ test("parses a hand-written minimal file with defaults", () => {
   assert.equal(board.id, "abc");
   assert.equal(board.title, "Unquoted title");
   assert.equal(board.pinned, false);
+  assert.equal(board.folder, "");
   assert.deepEqual(board.view, { x: 0, y: 0, scale: 1 });
   assert.deepEqual(board.notes, [
     { id: "n1", type: "text", x: 5, y: 6, text: "hello" },

@@ -855,6 +855,52 @@ export async function run({ page, step, expect, config }) {
     );
   });
 
+  await step("boards can move into collapsible, pinnable project folders", async () => {
+    let row = page
+      .locator(".board-row")
+      .filter({ hasText: "Renamed Board" })
+      .first();
+    page.once("dialog", (dialog) => dialog.accept("2026-09-01 / FCAR"));
+    await row.locator(".board-select").click({ button: "right" });
+    await page.waitForSelector(".board-context-menu", { timeout: 4000 });
+    await page
+      .locator(".board-context-item")
+      .filter({ hasText: "Move to folder" })
+      .click();
+
+    await waitFor(
+      () => {
+        const f = boardFiles().find((x) => x.endsWith("renamed-board.md"));
+        return f && fs.readFileSync(f, "utf8").includes('folder: "2026-09-01 / FCAR"');
+      },
+      12000,
+      "folder metadata to reach the board file"
+    );
+
+    const folder = page
+      .locator(".board-folder")
+      .filter({ hasText: "2026-09-01 / FCAR" })
+      .first();
+    expect((await folder.count()) === 1, "the project folder is missing");
+    row = folder.locator(".board-row").filter({ hasText: "Renamed Board" }).first();
+    expect(await row.isVisible(), "the board is not visible inside its folder");
+
+    await folder.locator(".board-folder-toggle").click();
+    expect(!(await row.isVisible()), "collapsing the folder left its board visible");
+    await folder.locator(".board-folder-toggle").click();
+    expect(await row.isVisible(), "expanding the folder did not restore its board");
+
+    await folder.locator(".board-folder-pin").click();
+    await waitFor(
+      () => {
+        const f = boardFiles().find((x) => x.endsWith("renamed-board.md"));
+        return f && fs.readFileSync(f, "utf8").includes("pinned: false");
+      },
+      12000,
+      "folder-wide unpin to reach the board file"
+    );
+  });
+
   await step("deleting a board moves its .md to trash (recoverable)", async () => {
     const trashDir = path.join(TEST_NOTES, "trash");
     const renamedFile = boardFiles().find((file) =>

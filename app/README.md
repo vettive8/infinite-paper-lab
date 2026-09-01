@@ -58,8 +58,10 @@ time you open their board in the browser that originally held them.)
   appearing as a notification over the canvas.
 - **Boards** (`Shift`+`Tab` opens the overlay): switch, pin/unpin, reorder
   (hold + drag), rename (double-click or `F2`), delete (right-click → *Delete
-  board*, or highlight + `Delete`). Arrow keys navigate, `Shift`+arrows
-  multi-select, `Enter` opens.
+  board*, or highlight + `Delete`). Group boards into persistent project/date
+  folders with **+ New folder** or *Move to folder…* in the right-click menu.
+  Folders collapse, rename on double-click, and pin/unpin all their boards at
+  once. Arrow keys navigate, `Shift`+arrows multi-select, `Enter` opens.
 - **New boards open in their own browser tab** — `+ New board`, or `Shift`+`Tab`
   then `N`. Middle-click a board, or right-click it and choose **Open in new
   tab**, to open it in a new tab. The URL carries

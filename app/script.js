@@ -20,6 +20,7 @@
   const themeSettingKey = `${appStoragePrefix}:theme`;
   const tabOverlayPositionKey = `${appStoragePrefix}:tab-overlay-position`;
   const boardOverlayStateKey = `${appStoragePrefix}:board-overlay-open`;
+  const collapsedFoldersStorageKey = `${appStoragePrefix}:collapsed-folders`;
   const syncChannelName = `${appStoragePrefix}:sync`;
   const imageDbName = "infinite-paper:v8.1.1:images";
   const imageStoreName = "images";
@@ -68,6 +69,7 @@
   let boardOverlay = null;
   let lastBoardOverlayToggle = null; // { at, wasHidden } — see "Shift+Tab N"
   let renamingBoardId = "";
+  let collapsedFolders = loadCollapsedFolders();
   let boardClickTimer = 0;
   let activeTabOverlayDrag = null;
   let suppressNextTabOverlayClick = false;
@@ -94,6 +96,31 @@
     return `${appStoragePrefix}:view:${boardId}`;
   }
 
+  function normalizeFolderName(value) {
+    return String(value || "")
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+  }
+
+  function loadCollapsedFolders() {
+    try {
+      const value = JSON.parse(localStorage.getItem(collapsedFoldersStorageKey) || "[]");
+      return new Set(Array.isArray(value) ? value.map(normalizeFolderName).filter(Boolean) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveCollapsedFolders() {
+    try {
+      localStorage.setItem(collapsedFoldersStorageKey, JSON.stringify([...collapsedFolders]));
+    } catch {
+      // Folder collapse is only a display preference; storage failure is harmless.
+    }
+  }
+
   function getTabTitleStorageKey(boardId = currentBoardId) {
     return `${appStoragePrefix}:tab-title:${boardId}`;
   }
@@ -104,6 +131,7 @@
       id: makeId(),
       title,
       pinned: false,
+      folder: "",
       order: 0,
       createdAt: now,
       updatedAt: now,
@@ -121,6 +149,7 @@
       id: board.id,
       title: normalizeTabTitle(board.title || `Board ${fallbackIndex + 1}`) || `Board ${fallbackIndex + 1}`,
       pinned: Boolean(board.pinned),
+      folder: normalizeFolderName(board.folder),
       order: Number.isFinite(Number(board.order)) ? Number(board.order) : fallbackIndex,
       createdAt: Number(board.createdAt) || now,
       updatedAt: Number(board.updatedAt) || now,
@@ -220,6 +249,7 @@
       id: board.id,
       title: board.title,
       pinned: Boolean(board.pinned),
+      folder: normalizeFolderName(board.folder),
       order: Number(board.order) || 0,
       createdAt: board.createdAt,
       updatedAt: board.updatedAt,
@@ -599,6 +629,7 @@
         .map((board) => ({
           id: board.id,
           pinned: board.pinned,
+          folder: board.folder || "",
           order: board.order,
           title: board.title,
         }))
@@ -1132,6 +1163,98 @@
     return [...pinned, ...unpinned];
   }
 
+  function groupedBoards() {
+    const groups = new Map();
+    for (const board of sortedBoards()) {
+      const folder = normalizeFolderName(board.folder);
+      if (!groups.has(folder)) {
+        groups.set(folder, []);
+      }
+      groups.get(folder).push(board);
+    }
+    const named = [...groups.entries()]
+      .filter(([name]) => Boolean(name))
+      .sort(([nameA, boardsA], [nameB, boardsB]) => {
+        const pinnedA = boardsA.some((board) => board.pinned);
+        const pinnedB = boardsB.some((board) => board.pinned);
+        if (pinnedA !== pinnedB) return pinnedA ? -1 : 1;
+        const orderA = Math.min(...boardsA.map((board) => board.order || 0));
+        const orderB = Math.min(...boardsB.map((board) => board.order || 0));
+        return orderA - orderB || nameA.localeCompare(nameB);
+      });
+    const root = groups.get("") || [];
+    return [...named, ...(root.length ? [["", root]] : [])];
+  }
+
+  function boardIdsForFolderAction(boardId) {
+    if (boardSelection.size > 1 && boardSelection.has(boardId)) {
+      return [...boardSelection];
+    }
+    return [boardId];
+  }
+
+  function moveBoardsToFolder(ids, folder) {
+    const normalized = normalizeFolderName(folder);
+    let changed = 0;
+    for (const id of new Set(ids)) {
+      const board = boards.find((item) => item.id === id);
+      if (board && board.folder !== normalized) {
+        board.folder = normalized;
+        board.updatedAt = Date.now();
+        changed += 1;
+      }
+    }
+    if (!changed) return;
+    saveBoardsIndex();
+    renderBoardOverlay();
+    showPasteStatus(
+      normalized
+        ? `Moved ${changed} board${changed === 1 ? "" : "s"} to ${normalized}`
+        : `Removed ${changed} board${changed === 1 ? "" : "s"} from folder`
+    );
+  }
+
+  function promptForBoardFolder(boardId) {
+    const board = boards.find((item) => item.id === boardId);
+    if (!board) return;
+    const value = window.prompt(
+      "Folder name (leave blank to remove from its folder)",
+      board.folder || ""
+    );
+    if (value == null) return;
+    moveBoardsToFolder(boardIdsForFolderAction(boardId), value);
+  }
+
+  function createFolderForCurrentSelection() {
+    const value = window.prompt("New folder name", "");
+    if (value == null || !normalizeFolderName(value)) return;
+    const ids =
+      boardSelection.size > 1
+        ? [...boardSelection]
+        : [getFocusedBoardOverlayId() || currentBoardId];
+    moveBoardsToFolder(ids, value);
+  }
+
+  function toggleFolderCollapsed(folder) {
+    if (collapsedFolders.has(folder)) collapsedFolders.delete(folder);
+    else collapsedFolders.add(folder);
+    saveCollapsedFolders();
+    renderBoardOverlay();
+  }
+
+  function toggleFolderPin(folder) {
+    const children = boards.filter((board) => board.folder === folder);
+    if (!children.length) return;
+    const shouldPin = !children.every((board) => board.pinned);
+    for (const board of children) {
+      board.pinned = shouldPin;
+      board.updatedAt = Date.now();
+    }
+    renumberBoards();
+    saveBoardsIndex();
+    renderBoardOverlay();
+  }
+
   // Reassign each board's order to its position in the sorted list, so the
   // numbers stay a clean 0..N-1 after any reorder or pin change.
   function renumberBoards() {
@@ -1169,6 +1292,7 @@
       row,
       target,
       pinned: row.dataset.pinned === "true",
+      folder: row.dataset.folder || "",
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -1187,13 +1311,15 @@
     if (!boardDrag || boardDrag.dragging) {
       return;
     }
-    const { list, row, pinned } = boardDrag;
+    const { list, row, pinned, folder } = boardDrag;
     boardDrag.dragging = true;
     window.clearTimeout(boardDrag.holdTimer);
     clearTimeout(boardClickTimer); // cancel any pending board switch
 
     const groupRows = Array.from(list.querySelectorAll(".board-row")).filter(
-      (other) => other.dataset.pinned === String(pinned)
+      (other) =>
+        other.dataset.pinned === String(pinned) &&
+        (other.dataset.folder || "") === folder
     );
     boardDrag.groupRows = groupRows;
     boardDrag.homeRects = groupRows.map((other) =>
@@ -1289,23 +1415,22 @@
   function commitBoardDrag(drag) {
     const { row, groupRows, fromIndex, targetIndex, pitch } = drag;
 
-    // Reorder this group's ids, then renumber every board's order.
+    // Reorder only inside this folder + pin group. Other folders keep their
+    // relative order even though their rows are rendered in separate sections.
     const groupIds = groupRows.map((other) => other.dataset.boardId);
     if (groupRows.length >= 2 && targetIndex !== fromIndex) {
       const [movedId] = groupIds.splice(fromIndex, 1);
       groupIds.splice(targetIndex, 0, movedId);
     }
-    const pinnedIds = drag.pinned
-      ? groupIds
-      : sortedBoards()
-          .filter((board) => board.pinned)
-          .map((board) => board.id);
-    const unpinnedIds = drag.pinned
-      ? sortedBoards()
-          .filter((board) => !board.pinned)
-          .map((board) => board.id)
-      : groupIds;
-    [...pinnedIds, ...unpinnedIds].forEach((id, index) => {
+    const allIds = sortedBoards().map((board) => board.id);
+    const groupSet = new Set(groupIds);
+    const slots = allIds
+      .map((id, index) => (groupSet.has(id) ? index : -1))
+      .filter((index) => index >= 0);
+    slots.forEach((slot, index) => {
+      allIds[slot] = groupIds[index];
+    });
+    allIds.forEach((id, index) => {
       const board = boards.find((entry) => entry.id === id);
       if (board) {
         board.order = index;
@@ -1334,6 +1459,72 @@
     document.body.appendChild(boardOverlay);
     renderBoardOverlay();
     return boardOverlay;
+  }
+
+  function createBoardOverlayRow(board) {
+    const row = document.createElement("div");
+    row.className = "board-row";
+    row.dataset.boardId = board.id;
+    row.dataset.pinned = board.pinned ? "true" : "false";
+    row.dataset.folder = board.folder || "";
+    row.classList.toggle("is-current", board.id === currentBoardId);
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showBoardContextMenu(board.id, event.clientX, event.clientY);
+    });
+
+    if (renamingBoardId === board.id) {
+      const renameForm = document.createElement("form");
+      renameForm.className = "board-rename-form";
+      const input = document.createElement("input");
+      input.className = "board-rename-input";
+      input.dataset.renameBoardId = board.id;
+      input.value = board.title || "Untitled board";
+      input.maxLength = 80;
+      input.spellcheck = false;
+      input.addEventListener("pointerdown", (event) => event.stopPropagation());
+      input.addEventListener("blur", () => finishBoardRename(board.id, input.value));
+      renameForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        finishBoardRename(board.id, input.value);
+      });
+      renameForm.appendChild(input);
+      row.appendChild(renameForm);
+    } else {
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = "board-select";
+      select.addEventListener("pointerdown", (event) => startBoardPress(event, board.id));
+      select.addEventListener("auxclick", (event) => {
+        if (event.button !== 1) return;
+        event.preventDefault();
+        openBoardInNewTab(board.id);
+      });
+      select.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        clearTimeout(boardClickTimer);
+        startBoardRename(board.id);
+      });
+      const name = document.createElement("span");
+      name.textContent = board.title || "Untitled board";
+      select.appendChild(name);
+      row.appendChild(select);
+    }
+
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "board-pin";
+    pin.textContent = board.pinned ? "Pinned" : "Pin";
+    pin.setAttribute("aria-pressed", board.pinned ? "true" : "false");
+    pin.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleBoardPin(board.id);
+    });
+    row.appendChild(pin);
+    return row;
   }
 
   function renderBoardOverlay() {
@@ -1404,87 +1595,78 @@
       event.preventDefault();
       openNewBoardInTab();
     });
-    side.appendChild(newButton);
+    const createActions = document.createElement("div");
+    createActions.className = "board-create-actions";
+    createActions.appendChild(newButton);
+
+    const folderButton = document.createElement("button");
+    folderButton.type = "button";
+    folderButton.className = "board-new-folder-button";
+    folderButton.textContent = "+ New folder";
+    folderButton.title = "Create a folder for the selected or current board";
+    folderButton.addEventListener("click", createFolderForCurrentSelection);
+    createActions.appendChild(folderButton);
+    side.appendChild(createActions);
 
     const list = document.createElement("div");
     list.className = "board-list";
-    for (const board of sortedBoards()) {
-      const row = document.createElement("div");
-      row.className = "board-row";
-      row.dataset.boardId = board.id;
-      row.dataset.pinned = board.pinned ? "true" : "false";
-      row.classList.toggle("is-current", board.id === currentBoardId);
-      // Right-click a row for board actions, matching a browser tab's menu.
-      row.addEventListener("contextmenu", (event) => {
+    for (const [folder, folderBoards] of groupedBoards()) {
+      if (!folder) {
+        for (const board of folderBoards) list.appendChild(createBoardOverlayRow(board));
+        continue;
+      }
+
+      const section = document.createElement("section");
+      section.className = "board-folder";
+      section.dataset.folder = folder;
+      const isCollapsed = collapsedFolders.has(folder);
+      section.classList.toggle("is-collapsed", isCollapsed);
+
+      const header = document.createElement("div");
+      header.className = "board-folder-header";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "board-folder-toggle";
+      toggle.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+      toggle.title = isCollapsed ? "Expand folder" : "Collapse folder";
+      toggle.textContent = isCollapsed ? "▸" : "▾";
+      toggle.addEventListener("click", () => toggleFolderCollapsed(folder));
+
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "board-folder-label";
+      label.title = "Double-click to rename this folder";
+      label.textContent = folder;
+      label.addEventListener("dblclick", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        showBoardContextMenu(board.id, event.clientX, event.clientY);
+        const next = window.prompt("Rename folder", folder);
+        if (next == null || !normalizeFolderName(next)) return;
+        moveBoardsToFolder(folderBoards.map((board) => board.id), next);
       });
 
-      if (renamingBoardId === board.id) {
-        const renameForm = document.createElement("form");
-        renameForm.className = "board-rename-form";
-
-        const input = document.createElement("input");
-        input.className = "board-rename-input";
-        input.dataset.renameBoardId = board.id;
-        input.value = board.title || "Untitled board";
-        input.maxLength = 80;
-        input.spellcheck = false;
-        input.addEventListener("pointerdown", (event) => {
-          event.stopPropagation();
-        });
-        input.addEventListener("blur", () => {
-          finishBoardRename(board.id, input.value);
-        });
-
-        renameForm.addEventListener("submit", (event) => {
-          event.preventDefault();
-          finishBoardRename(board.id, input.value);
-        });
-
-        renameForm.appendChild(input);
-        row.appendChild(renameForm);
-      } else {
-        const select = document.createElement("button");
-        select.type = "button";
-        select.className = "board-select";
-        select.addEventListener("pointerdown", (event) =>
-          startBoardPress(event, board.id)
-        );
-        // Middle button (scroll-wheel click) opens the board in a new tab.
-        select.addEventListener("auxclick", (event) => {
-          if (event.button !== 1) {
-            return;
-          }
-          event.preventDefault();
-          openBoardInNewTab(board.id);
-        });
-        select.addEventListener("dblclick", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          clearTimeout(boardClickTimer);
-          startBoardRename(board.id);
-        });
-        const name = document.createElement("span");
-        name.textContent = board.title || "Untitled board";
-        select.appendChild(name);
-        row.appendChild(select);
-      }
+      const count = document.createElement("span");
+      count.className = "board-folder-count";
+      count.textContent = String(folderBoards.length);
 
       const pin = document.createElement("button");
       pin.type = "button";
-      pin.className = "board-pin";
-      pin.textContent = board.pinned ? "Pinned" : "Pin";
-      pin.setAttribute("aria-pressed", board.pinned ? "true" : "false");
-      pin.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleBoardPin(board.id);
-      });
-      row.appendChild(pin);
+      pin.className = "board-folder-pin";
+      const allPinned = folderBoards.every((board) => board.pinned);
+      const somePinned = folderBoards.some((board) => board.pinned);
+      pin.textContent = allPinned ? "Pinned" : somePinned ? "Mixed" : "Pin";
+      pin.setAttribute("aria-pressed", allPinned ? "true" : "false");
+      pin.title = allPinned ? "Unpin every board in this folder" : "Pin every board in this folder";
+      pin.addEventListener("click", () => toggleFolderPin(folder));
+      header.append(toggle, label, count, pin);
+      section.appendChild(header);
 
-      list.appendChild(row);
+      const children = document.createElement("div");
+      children.className = "board-folder-boards";
+      children.hidden = isCollapsed;
+      for (const board of folderBoards) children.appendChild(createBoardOverlayRow(board));
+      section.appendChild(children);
+      list.appendChild(section);
     }
     side.appendChild(list);
     boardOverlay.appendChild(side);
@@ -1600,7 +1782,14 @@
   let boardSelection = new Set();
 
   function boardOrderIds() {
-    return sortedBoards().map((board) => board.id);
+    if (boardOverlay && !boardOverlay.hidden) {
+      const visible = [...boardOverlay.querySelectorAll(".board-row")]
+        .filter((row) => row.offsetParent !== null)
+        .map((row) => row.dataset.boardId)
+        .filter(Boolean);
+      if (visible.length) return visible;
+    }
+    return groupedBoards().flatMap(([, entries]) => entries.map((board) => board.id));
   }
 
   // Move the keyboard highlight to a board. extend:true (Shift+Arrow)
@@ -1837,6 +2026,16 @@
       openBoardInNewTab(boardId);
     });
     menu.appendChild(openItem);
+
+    const moveItem = document.createElement("button");
+    moveItem.type = "button";
+    moveItem.className = "board-context-item";
+    moveItem.textContent = "Move to folder…";
+    moveItem.addEventListener("click", () => {
+      closeBoardContextMenu();
+      promptForBoardFolder(boardId);
+    });
+    menu.appendChild(moveItem);
 
     const deleteItem = document.createElement("button");
     deleteItem.type = "button";

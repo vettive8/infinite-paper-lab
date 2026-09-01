@@ -34,6 +34,7 @@ back into `boards/`.
 id: 3f9a2b1c-...
 title: "Inbox"
 pinned: true
+folder: "2026-09-01 / FCAR"
 order: 2
 createdAt: 1778836932000
 updatedAt: 1778836999000
@@ -69,6 +70,9 @@ YAML between the opening and closing `---`. Holds board-level metadata:
 - `id` — the canonical board identity (UUID).
 - `title` — always double-quoted; `"` and `\` are backslash-escaped.
 - `pinned` — `true`/`false`; pinned boards sort first in the overlay.
+- `folder` — optional project/date folder shown in the Boards overlay. An
+  empty string keeps the board at the top level. Folder names travel with the
+  board in Git; older files without this field remain top-level boards.
 - `order` — the board's position in the overlay list (drag to reorder).
 - `createdAt` / `updatedAt` / `lastOpenedAt` — millisecond timestamps.
 - `revision` — bumped on every app save (a monotonic timestamp). Saves
